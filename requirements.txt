@@ -1,0 +1,16 @@
+# Core dependencies
+httpx
+python-dotenv
+
+# Machine Learning / AI
+torch
+transformers
+
+# Vector Database / RAG
+pinecone==5.0.1
+
+# Testing
+pytest
+
+# Optional: For better type hints
+typing-extensions
