@@ -1,0 +1,17 @@
+{
+  "name": "ELLA - AI Therapy Assistant",
+  "short_name": "ELLA",
+  "description": "Your AI-powered therapy companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#7C3AED",
+  "icons": [
+    {
+      "src": "/ella-favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+} 

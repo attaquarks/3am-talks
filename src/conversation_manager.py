@@ -13,8 +13,6 @@ from rag_layer import RAGService
 from questionnaire import PersonalityQuestionnaire
 
 logger = logging.getLogger(__name__)
-
-
 class ConversationManager:
     """
     Main orchestrator for the 3AM Talks therapy system.

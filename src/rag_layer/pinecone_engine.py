@@ -55,7 +55,8 @@ def search_with_inference(
         # Parse results
         techniques = []
         if hasattr(results, 'matches') and results.matches:
-            for match in results.matches:
+            logger.info(f"Retrieved {len(results.matches)} relevant techniques:")
+            for idx, match in enumerate(results.matches, 1):
                 technique = {
                     "id": match.id,
                     "score": match.score,
@@ -63,8 +64,11 @@ def search_with_inference(
                     "metadata": match.metadata
                 }
                 techniques.append(technique)
-            
-            logger.info(f"Retrieved {len(techniques)} relevant techniques")
+                
+                # Log detailed technique info
+                tech_name = match.metadata.get('technique_name', match.id)
+                modality = match.metadata.get('modality', 'Unknown')
+                logger.info(f"  [{idx}] {tech_name} ({modality}) - Similarity: {match.score:.4f} - ID: {match.id}")
         else:
             logger.warning("No results returned from Pinecone")
         

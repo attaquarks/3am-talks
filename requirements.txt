@@ -9,6 +9,18 @@ transformers
 # Vector Database / RAG
 pinecone==5.0.1
 
+# Web Framework / API Server
+fastapi
+uvicorn[standard]
+python-multipart
+itsdangerous
+
+# Web Framework / API Server
+fastapi
+uvicorn[standard]
+python-multipart
+itsdangerous
+
 # Testing
 pytest
 

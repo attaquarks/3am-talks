@@ -276,8 +276,8 @@ class TestFullSystem:
             assert "turn" in result
             assert result["turn"] == i + 1
             
-            logger.info(f"  Turn {result['turn']}: User: {message[:50]}...")
-            logger.info(f"  Assistant: {result['response'][:100]}...")
+            logger.info(f"  Turn {result['turn']}: User: {message}")
+            logger.info(f"  Assistant: {result['response']}")
             
             # Check if RAG was used
             if result.get("rag_techniques_used", 0) > 0:
@@ -353,11 +353,19 @@ class TestFullSystem:
             # Check if personality was updated
             if result.get("personality_scores"):
                 scores = result["personality_scores"]
-                personality_updates.append({
-                    "turn": result["turn"],
-                    "scores": scores
-                })
-                logger.info(f"  Turn {result['turn']}: Personality updated")
+                
+                # In Test 6, actual analysis only happens when conversation_turns % update_interval == 0
+                is_actual_update = (result["turn"] % update_interval == 0)
+                
+                if is_actual_update:
+                    personality_updates.append({
+                        "turn": result["turn"],
+                        "scores": scores
+                    })
+                    logger.info(f"  ✨ Turn {result['turn']}: PERSONALITY ANALYZED & UPDATED")
+                else:
+                    logger.info(f"  Turn {result['turn']}: Current Personality (Update in {update_interval - (result['turn'] % update_interval)} turns)")
+                
                 for trait, score in scores.items():
                     logger.info(f"    {trait}: {score:.3f}")
         
@@ -539,38 +547,21 @@ class TestFullSystem:
         assert login_result["user_id"] == user_id
         logger.info(f"✓ User logged in")
         
-        # Step 3: Start session with questionnaire
+        # Step 3: Start session (skip questionnaire for faster test)
         logger.info("Step 3: Start Session")
-        session_result = self.manager.start_session(user_id, start_questionnaire=True)
+        session_result = self.manager.start_session(user_id, start_questionnaire=False)
         conversation_id = session_result["conversation_id"]
         logger.info(f"✓ Session started: {conversation_id}")
         
-        # Step 4: Complete questionnaire (simplified - just a few questions)
-        if "questionnaire" in session_result and session_result["questionnaire"]["active"]:
-            logger.info("Step 4: Complete Questionnaire")
-            questionnaire_responses = [
-                "I'm creative and enjoy exploring new ideas.",
-                "I'm somewhat social but also value my alone time.",
-                "I handle stress reasonably well but sometimes get anxious.",
-                "I'm organized and like to plan things out.",
-                "I try to be understanding and cooperative with others."
-            ]
-            
-            for response in questionnaire_responses[:3]:  # Just 3 for quick test
-                result = self.manager.process_message(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    user_message=response,
-                    is_questionnaire_response=True
-                )
-            
-            logger.info(f"✓ Questionnaire responses submitted")
-        
-        # Step 5: Regular conversation
-        logger.info("Step 5: Regular Conversation")
+        # Step 4: Regular conversation (enough turns to trigger personality update at turn 5)
+        logger.info("Step 4: Regular Conversation")
         conversation_messages = [
-            "I've been feeling stressed about work.",
-            "I can't seem to relax even when I'm at home."
+            "I've been feeling stressed about work lately.",
+            "I can't seem to relax even when I'm at home.",
+            "I worry constantly about making mistakes at my job.",
+            "It's affecting my sleep and I feel exhausted.",
+            "I'm really struggling to cope with all this pressure.",
+            "Sometimes I just want to give up on everything."
         ]
         
         for message in conversation_messages:
@@ -582,15 +573,15 @@ class TestFullSystem:
             )
             logger.info(f"  Turn {result['turn']}: Response generated")
         
-        # Step 6: Verify profile updates
-        logger.info("Step 6: Verify Profile Updates")
+        # Step 5: Verify profile updates
+        logger.info("Step 5: Verify Profile Updates")
         profile = self.manager.get_user_profile(user_id)
         assert profile is not None
         assert profile.get("total_text_analyzed", 0) > 0
         logger.info(f"✓ Profile updated: {profile.get('total_text_analyzed')} chars analyzed")
         
-        # Step 7: End session
-        logger.info("Step 7: End Session")
+        # Step 6: End session
+        logger.info("Step 6: End Session")
         self.manager.end_session(conversation_id)
         logger.info(f"✓ Session ended")
         

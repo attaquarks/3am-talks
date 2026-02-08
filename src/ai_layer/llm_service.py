@@ -16,7 +16,7 @@ class LLMService:
     def __init__(self, model_name: str = "psychocounsel", info_base_url: str = "http://127.0.0.1:11434"):
         self.model_name = model_name
         self.base_url = info_base_url
-        self.client = httpx.Client(base_url=self.base_url, timeout=300.0)
+        self.client = httpx.Client(base_url=self.base_url, timeout=180.0)
 
     # Core LLM4CBT Persona - The immutable foundation
     SYSTEM_PERSONA = (
@@ -111,11 +111,25 @@ In your output, 'Response' should adhere to the following guideline:
 
         try:
             logger.info(f"Sending request to Ollama: {self.model_name}")
+            
+            # Log the full system prompt for debugging
+            logger.info("=" * 80)
+            logger.info("FULL SYSTEM PROMPT:")
+            logger.info("-" * 80)
+            logger.info(messages[0]["content"])
+            logger.info("=" * 80)
+            
             response = self.client.post("/api/chat", json=payload)
             response.raise_for_status()
             
             result = response.json()
             content = result.get("message", {}).get("content", "")
+            
+            logger.info("=" * 80)
+            logger.info("LLM RESPONSE:")
+            logger.info("-" * 80)
+            logger.info(content)
+            logger.info("=" * 80)
             
             try:
                 # Parse JSON output from model

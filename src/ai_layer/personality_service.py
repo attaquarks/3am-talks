@@ -2,6 +2,7 @@ import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 from typing import Dict
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,15 @@ class PersonalityService:
     Wraps the BERT personality model.
     """
     def __init__(self, model_path: str = "Models/bert-base-personality"):
+        # Resolve relative paths against the project root
+        p = Path(model_path)
+        if not p.is_absolute():
+            # Project root is 3 levels up from this file: src/ai_layer/personality_service.py
+            project_root = Path(__file__).parent.parent.parent
+            resolved_path = project_root / model_path
+            if resolved_path.exists():
+                model_path = str(resolved_path)
+                
         self.model_path = model_path
         self.model = None
         self.tokenizer = None
