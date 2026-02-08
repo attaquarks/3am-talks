@@ -39,3 +39,6 @@ Thumbs.db
 
 # Others
 tests/data/
+cookies.txt
+.opencode/
+.tmp/
