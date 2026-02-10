@@ -1,0 +1,26 @@
+# Core dependencies
+httpx
+python-dotenv
+
+# Machine Learning / AI
+torch
+transformers
+
+# Vector Database / RAG
+pinecone==5.0.1
+
+# Web Framework / API Server
+fastapi
+uvicorn[standard]
+python-multipart
+itsdangerous
+
+# LiveKit Voice Agent
+livekit-agents[openai,silero,elevenlabs]~=1.3
+livekit-api
+
+# Testing
+pytest
+
+# Optional: For better type hints
+typing-extensions

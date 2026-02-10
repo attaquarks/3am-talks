@@ -1,0 +1,47 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# Large model files
+Models/
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+*.gguf
+
+# Environment variables
+.env
+
+# IDE and agent files
+.agent/
+.cursor/
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+*.db
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# Others
+tests/data/
+cookies.txt
+.opencode/
+.tmp/
+node_modules/
+dist/
+*.log
