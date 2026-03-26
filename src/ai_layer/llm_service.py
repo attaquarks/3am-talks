@@ -9,18 +9,21 @@ logger = logging.getLogger(__name__)
 
 class LLMService:
     """
-    Service for interacting with the LLM (Ollama).
-    Handles prompt construction and API communication.
+    Service for interacting with the LLM.
+    Handles prompt construction and API communication using OpenAI compatible style endpoints.
     """
 
-    def __init__(self, model_name: str = "psychocounsel", info_base_url: str = "http://127.0.0.1:11434"):
+    def __init__(self, model_name: str = "psychocounsel"):
+        import os
         self.model_name = model_name
-        self.base_url = info_base_url
-        self.client = httpx.Client(base_url=self.base_url, timeout=180.0)
+        self.colab_api_url = os.getenv("COLAB_API_URL")
+        if not self.colab_api_url:
+            logger.warning("COLAB_API_URL is not set in environment variables.")
+        self.client = httpx.Client(timeout=180.0)
 
     # Core LLM4CBT Persona - The immutable foundation
     SYSTEM_PERSONA = (
-        "Act as if you're a professional therapist for eliciting automatic thoughts. "
+        "Act as a professional therapist for eliciting automatic thoughts. "
         "You provide evidence-based psychotherapy to help patients with mental health challenges."
     )
     
@@ -103,14 +106,12 @@ In your output, 'Response' should adhere to the following guideline:
             "model": self.model_name,
             "messages": messages,
             "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.7,
-            }
+            "temperature": 0.7,
+            "response_format": {"type": "json_object"}
         }
 
         try:
-            logger.info(f"Sending request to Ollama: {self.model_name}")
+            logger.info(f"Sending request to Colab API: {self.colab_api_url}")
             
             # Log the full system prompt for debugging
             logger.info("=" * 80)
@@ -119,11 +120,17 @@ In your output, 'Response' should adhere to the following guideline:
             logger.info(messages[0]["content"])
             logger.info("=" * 80)
             
-            response = self.client.post("/api/chat", json=payload)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer EMPTY"
+            }
+            
+            response = self.client.post(self.colab_api_url, json=payload, headers=headers)
             response.raise_for_status()
             
             result = response.json()
-            content = result.get("message", {}).get("content", "")
+            # OpenAI compatible response structure
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
             
             logger.info("=" * 80)
             logger.info("LLM RESPONSE:")

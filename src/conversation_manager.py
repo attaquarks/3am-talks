@@ -22,7 +22,6 @@ class ConversationManager:
     def __init__(
         self,
         model_name: str = "psychocounsel",
-        ollama_base_url: str = "http://127.0.0.1:11434",
         personality_model_path: str = "Models/bert-base-personality",
         personality_update_interval: int = 40,  # Update personality every 40 turns
         enable_rag: bool = True,
@@ -32,8 +31,7 @@ class ConversationManager:
         Initialize the conversation manager
         
         Args:
-            model_name: Ollama model name
-            ollama_base_url: Ollama API URL
+            model_name: Model name
             personality_model_path: Path to BERT personality model
             personality_update_interval: Update personality every N turns (30-50 recommended)
             enable_rag: Enable RAG retrieval
@@ -44,7 +42,7 @@ class ConversationManager:
         self.user_service = UserService(self.db_client)
         
         # Initialize AI components
-        self.llm = LLMService(model_name, ollama_base_url)
+        self.llm = LLMService(model_name)
         
         self.enable_rag = enable_rag
         self.enable_personality = enable_personality

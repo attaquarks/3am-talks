@@ -8,6 +8,7 @@ Runs as a standalone process: python src/voice_agent.py dev
 
 import logging
 from dotenv import load_dotenv
+import os
 
 from livekit import agents, rtc
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
@@ -67,9 +68,9 @@ def build_session() -> AgentSession:
             language_code="en",
         ),
         llm=openai.LLM(
-            model="llama3.2:3b",
-            base_url="http://127.0.0.1:11434/v1",
-            api_key="ollama",
+            model="psychocounsel",
+            base_url=os.getenv("COLAB_API_URL", "").replace("/chat/completions", "") if os.getenv("COLAB_API_URL") else None,
+            api_key="empty",
             timeout=httpx.Timeout(connect=30.0, read=120.0, write=10.0, pool=10.0),
         ),
         tts=elevenlabs.TTS(

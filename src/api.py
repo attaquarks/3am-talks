@@ -100,7 +100,6 @@ def get_manager():
 
             conversation_manager = ConversationManager(
                 model_name="psychocounsel",
-                ollama_base_url="http://127.0.0.1:11434",
                 personality_model_path=str(
                     ROOT_DIR / "Models" / "bert-base-personality"
                 ),
