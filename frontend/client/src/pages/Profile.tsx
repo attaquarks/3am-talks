@@ -8,7 +8,6 @@ import { useTheme } from "@/components/ThemeProvider";
 import { User, Settings, Moon, Sun, Palette, Shield, Bell, Heart, TrendingUp, Calendar, Award, Download, Trash2, FileText } from "lucide-react";
 import { useProfile } from "@/hooks/useProfile";
 import { useUserStats } from "@/hooks/useUserStats";
-import { supabase, supabaseUrl } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useConversations } from "@/hooks/useConversations";
 import { useMoodEntries } from "@/hooks/useMoodEntries";
@@ -54,6 +53,21 @@ export default function Profile() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [privacyLoading, setPrivacyLoading] = useState(false);
 
+  const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
+    const response = await fetch(endpoint, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ message: "Request failed" }));
+      throw new Error(err.message || "Request failed");
+    }
+    return response;
+  };
+
   useEffect(() => {
     if (profile) {
       setProfileData({
@@ -82,24 +96,15 @@ export default function Profile() {
         emergency_contact: profileData.emergencyContact
       });
 
-      // Update email if it has changed
+      // Email update requires dedicated backend auth endpoint (not implemented yet)
       if (user && profileData.email !== user.email) {
-        const { error: emailError } = await supabase.auth.updateUser({
-          email: profileData.email
+        await apiRequest("/api/account/email", {
+          method: "PATCH",
+          body: JSON.stringify({ new_email: profileData.email }),
         });
-
-        if (emailError) {
-          toast({
-            title: "Error",
-            description: emailError.message,
-            variant: "destructive",
-          });
-          return;
-        }
-
         toast({
-          title: "Email Update",
-          description: "A confirmation email has been sent to your new email address. Please check your inbox and confirm the change.",
+          title: "Email Updated",
+          description: "Your email address was updated successfully.",
         });
       }
     } catch (error) {
@@ -119,18 +124,9 @@ export default function Profile() {
     const allMessages: Record<string, any[]> = {};
     for (const conv of conversations) {
       try {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          console.error('Error fetching messages:', error);
-          allMessages[conv.id] = [];
-        } else {
-          allMessages[conv.id] = data || [];
-        }
+        const response = await apiRequest(`/api/data/messages/${conv.id}`, { method: "GET" });
+        const data = await response.json();
+        allMessages[conv.id] = data || [];
       } catch (error) {
         console.error('Error fetching messages for conversation:', conv.id, error);
         allMessages[conv.id] = [];
@@ -145,7 +141,7 @@ export default function Profile() {
       await refetchConversations();
       await refetchMoodEntries();
       const allMessages = await fetchAllMessages();
-      const { data: { user } } = await supabase.auth.getUser();
+      const currentUserId = user?.id || "user";
 
       const exportData = {
         profile: profileData,
@@ -154,14 +150,14 @@ export default function Profile() {
         messages: allMessages,
         moodEntries,
         exportedAt: new Date().toISOString(),
-        userId: user?.id || 'user',
+        userId: currentUserId,
       };
 
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ella-export-${user?.id || 'user'}-${Date.now()}.json`;
+      a.download = `ella-export-${currentUserId}-${Date.now()}.json`;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -198,18 +194,24 @@ export default function Profile() {
 
     setIsChangingPassword(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) {
-        toast({ title: "Error", description: error.message, variant: "destructive" });
-      } else {
-        toast({ title: "Success", description: "Password updated successfully." });
-        setShowPasswordModal(false);
-        setOldPassword("");
-        setNewPassword("");
-        setConfirmNewPassword("");
-      }
-    } catch (err) {
-      toast({ title: "Error", description: "Failed to update password.", variant: "destructive" });
+      await apiRequest("/api/account/password", {
+        method: "PATCH",
+        body: JSON.stringify({
+          old_password: oldPassword,
+          new_password: newPassword,
+        }),
+      });
+      toast({ title: "Success", description: "Password updated successfully." });
+      setShowPasswordModal(false);
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err?.message || "Failed to update password.",
+        variant: "destructive",
+      });
     } finally {
       setIsChangingPassword(false);
     }
@@ -219,15 +221,12 @@ export default function Profile() {
     setIsDownloading(true);
     try {
       await refetchConversations();
-      const { data: { user } } = await supabase.auth.getUser();
+      const currentUserId = user?.id || "user";
       const allMessages: Record<string, any[]> = {};
 
       for (const conv of conversations) {
-        const { data } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: true });
+        const response = await apiRequest(`/api/data/messages/${conv.id}`, { method: "GET" });
+        const data = await response.json();
         allMessages[conv.id] = data || [];
       }
 
@@ -257,7 +256,7 @@ export default function Profile() {
         if (y > 280) { doc.addPage(); y = 15; }
       });
 
-      doc.save(`ella-conversation-history-${user?.id || 'user'}.pdf`);
+      doc.save(`ella-conversation-history-${currentUserId}.pdf`);
 
       toast({
         title: "Success",
@@ -278,22 +277,16 @@ export default function Profile() {
   const handleDeleteConversationHistory = async () => {
     if (confirm('Are you sure you want to delete all conversation history? This action cannot be undone.')) {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { error } = await supabase
-            .from('conversations')
-            .delete()
-            .eq('user_id', user.id);
-
-          if (error) throw error;
-
-          toast({
-            title: "Success",
-            description: "All conversation history has been deleted.",
-          });
-
-          await refetchConversations();
+        for (const conv of conversations) {
+          await apiRequest(`/api/data/conversations/${conv.id}`, { method: "DELETE" });
         }
+
+        toast({
+          title: "Success",
+          description: "All conversation history has been deleted.",
+        });
+
+        await refetchConversations();
       } catch (error) {
         console.error('Error deleting conversations:', error);
         toast({
@@ -308,48 +301,12 @@ export default function Profile() {
   const handleDeleteAccount = async () => {
     setIsDeletingAccount(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('No user found');
-      }
-
-      // Show progress toast
+      await apiRequest("/api/account", { method: "DELETE" });
       toast({
-        title: "Deleting Account",
-        description: "Please wait while we delete your data...",
+        title: "Account Deleted",
+        description: "Your account and all associated data were deleted successfully.",
       });
-
-      // Call the Edge Function to properly delete the account
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No active session found');
-      }
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/delete-account`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to delete account');
-      }
-
-      if (!result.success) {
-        throw new Error(result.error || 'Account deletion failed');
-      }
-
-      toast({
-        title: "Account Completely Deleted",
-        description: "Your account, email, password, and all data have been permanently deleted. You cannot log in with this email again.",
-      });
-
-      // Force redirect to landing page and clear any auth state
-      window.location.href = '/';
+      window.location.href = "/";
     } catch (error) {
       console.error('Error deleting account:', error);
       toast({
@@ -413,8 +370,7 @@ export default function Profile() {
     setDeletingId(id);
     setPrivacyLoading(true);
     try {
-      const { error } = await supabase.from('conversations').delete().eq('id', id);
-      if (error) throw error;
+      await apiRequest(`/api/data/conversations/${id}`, { method: "DELETE" });
       toast({ title: 'Deleted', description: 'Conversation deleted.' });
       await refetchConversations();
     } catch (err) {
@@ -431,8 +387,7 @@ export default function Profile() {
     setDeletingId(id);
     setPrivacyLoading(true);
     try {
-      const { error } = await supabase.from('mood_entries').delete().eq('id', id);
-      if (error) throw error;
+      await apiRequest(`/api/data/mood_entries/${id}`, { method: "DELETE" });
       toast({ title: 'Deleted', description: 'Mood entry deleted.' });
       await refetchMoodEntries();
     } catch (err) {
@@ -456,11 +411,7 @@ export default function Profile() {
 
   const handleLogout = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('Supabase logout error:', error);
-        throw error;
-      }
+      await signOut();
       toast({ title: "Logged out", description: "You have been successfully logged out." });
       // Navigate to landing page after logout
       navigate('/');

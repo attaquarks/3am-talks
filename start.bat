@@ -4,15 +4,16 @@ REM Usage: start.bat
 REM Prerequisites:
 REM   - Python venv activated with deps installed (pip install -r requirements.txt)
 REM   - Node.js deps installed (cd frontend && npm install)
-REM   - Ollama running with psychocounsel model (ollama run psychocounsel)
-REM   - .env configured with SUPABASE_URL, SUPABASE_KEY, PINECONE_API_KEY
+REM   - .env configured with SUPABASE_URL, SUPABASE_KEY, PINECONE_API_KEY, COLAB_API_URL
 
 echo ================================================
 echo   3AM Talks (ELLA AI) — Starting Services
 echo ================================================
 
 echo [1/3] Starting backend API on http://localhost:5050 (using .venv) ...
-start "3AM-Backend" cmd /c "cd /d %~dp0 && %~dp0.venv\Scripts\python.exe src\api.py"
+REM Use -m uvicorn so the app loads once as src.api (avoids odd reload/double-import with python src\api.py)
+REM Close the old "3AM-Backend" window before re-running start.bat, or you keep a stale API (wrong routes / HTTP 404).
+start "3AM-Backend" cmd /c "cd /d %~dp0 && %~dp0.venv\Scripts\python.exe -m uvicorn src.api:app --host 0.0.0.0 --port 5050 --reload"
 
 echo [2/3] Starting frontend on http://localhost:5173 ...
 start "3AM-Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"

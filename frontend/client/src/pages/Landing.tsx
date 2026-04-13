@@ -651,6 +651,35 @@ function ProtocolVisual({ type }: { type: (typeof protocolSteps)[number]["type"]
 }
 
 export default function Landing() {
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    const error = search.get("error");
+    const errorCode = search.get("error_code");
+    if (error || errorCode) {
+      // #region agent log
+      fetch("http://127.0.0.1:7498/ingest/de8af993-af91-47ad-aef8-03b59e70199a", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a2dded" },
+        body: JSON.stringify({
+          sessionId: "a2dded",
+          location: "Landing.tsx:oauth_error",
+          message: "Supabase OAuth error on Site URL root",
+          data: {
+            error,
+            errorCode,
+            path: window.location.pathname,
+            origin: window.location.origin,
+            hashLen: window.location.hash.length,
+          },
+          hypothesisId: "H2-H5",
+          runId: "pre-fix",
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
+  }, []);
+
   return (
     <div className="min-h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-x-hidden">
       <BackgroundDecor />

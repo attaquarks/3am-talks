@@ -33,12 +33,14 @@ export function useSessionTracker() {
     }, 60000); // Update every minute
   };
 
-  const endSession = async () => {
+  const endSession = async (persistStats = true) => {
     if (!isActive || !sessionStartRef.current) return;
 
     const sessionDuration = Math.floor((Date.now() - sessionStartRef.current) / 1000 / 60);
 
-    if (sessionDuration > 0) {
+    // On logout/account deletion we end locally and skip network writes,
+    // otherwise /api/data/user_stats races with cleared auth cookie.
+    if (persistStats && sessionDuration > 0) {
       await updateSessionTime(sessionDuration);
     }
 
@@ -66,34 +68,37 @@ export function useSessionTracker() {
         return;
       }
 
-      console.log(`Recording daily login for user ${user.id} on ${today}`);
-
-      // Update last_session_date to today's date
-      // We fetch current stats first to know if we need to update streak
+      // Stats row is created on the server at login/OAuth; updates must use PATCH, not POST
+      // (POST insert races and returns 409 when the row already exists).
       const response = await fetch('/api/data/user_stats');
       if (!response.ok) return;
       const currentStats = await response.json();
 
-      const updates: any = { last_session_date: today };
+      if (currentStats.last_session_date === today) {
+        dailyLoginRecordedRef.current = today;
+        return;
+      }
 
-      // Calculate streak
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-      if (currentStats.last_session_date === today) {
-        // Already logged in today (stats wise)
-      } else if (currentStats.last_session_date === yesterday) {
+      const updates: Record<string, number | string> = { last_session_date: today };
+
+      if (currentStats.last_session_date === yesterday) {
         updates.current_streak = (currentStats.current_streak || 0) + 1;
       } else {
         updates.current_streak = 1;
       }
 
-      await fetch('/api/data/user_stats', {
-        method: 'POST',
+      const patchRes = await fetch(`/api/data/user_stats/${user.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(updates),
       });
+      if (!patchRes.ok) {
+        console.error('Failed to record daily login (patch user_stats):', patchRes.status);
+        return;
+      }
 
-      // Mark today's login as recorded
       dailyLoginRecordedRef.current = today;
     } catch (error) {
       console.error('Error recording daily login:', error);
@@ -113,15 +118,17 @@ export function useSessionTracker() {
       const newTotalMinutes = currentTotalMinutes + minutes;
       const today = new Date().toISOString().split('T')[0];
 
-      await fetch('/api/data/user_stats', {
-        method: 'POST',
+      const patchRes = await fetch(`/api/data/user_stats/${user.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           total_minutes: newTotalMinutes,
-          last_session_date: today
-        })
+          last_session_date: today,
+        }),
       });
-
+      if (!patchRes.ok) {
+        console.error('Failed to update session time (patch user_stats):', patchRes.status);
+      }
     } catch (error) {
       console.error('Error updating session time:', error);
     }
@@ -132,7 +139,7 @@ export function useSessionTracker() {
     if (user) {
       startSession();
     } else {
-      endSession();
+      void endSession(false);
       dailyLoginRecordedRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -160,7 +167,7 @@ export function useSessionTracker() {
       events.forEach(event => document.removeEventListener(event, handleActivity, true));
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
-      endSession();
+      void endSession(false);
     };
   }, [isActive, user]);
 

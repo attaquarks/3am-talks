@@ -14,7 +14,7 @@ export function AuthWrapper({ children }: AuthWrapperProps) {
   useEffect(() => {
     if (loading) return;
 
-    const publicPaths = ['/', '/auth', '/learn-more'];
+    const publicPaths = ['/', '/auth', '/learn-more', '/auth/oauth-success'];
     const isPublicPath = publicPaths.includes(location.pathname);
 
     if (!user && !isPublicPath) {

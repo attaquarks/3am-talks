@@ -51,7 +51,6 @@ class TestFullSystem:
         # Initialize conversation manager with test settings
         self.manager = ConversationManager(
             model_name="psychocounsel",
-            ollama_base_url="http://127.0.0.1:11434",
             personality_model_path="Models/bert-base-personality",
             personality_update_interval=5,  # Use 5 for faster testing (normally 30-50)
             enable_rag=True,

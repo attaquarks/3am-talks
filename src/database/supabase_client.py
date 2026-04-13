@@ -8,6 +8,22 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+def normalize_postgrest_value(value: Optional[str]) -> str:
+    """
+    Strip PostgREST-style 'eq.' prefixes from filter values.
+
+    The frontend sometimes sends values like 'eq.<uuid>' or 'eq.eq.<uuid>';
+    code that prepends another 'eq.' must normalize first to avoid invalid
+    queries (e.g. conversation_id=eq.eq.<uuid>).
+    """
+    if value is None:
+        return ""
+    v = str(value).strip()
+    while v.startswith("eq."):
+        v = v[3:].strip()
+    return v
+
+
 class SupabaseClient:
     """Client for interacting with Supabase database"""
     
@@ -69,7 +85,10 @@ class SupabaseClient:
             result = response.json()
             return result[0] if isinstance(result, list) and len(result) > 0 else result
         except Exception as e:
-            logger.error(f"Error inserting into {table}: {e}")
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 409:
+                logger.debug(f"Conflict inserting into {table}: {e}")
+            else:
+                logger.error(f"Error inserting into {table}: {e}")
             raise
     
     def update(self, table: str, data: dict, filters: dict) -> dict:
@@ -150,6 +169,31 @@ class SupabaseClient:
             return response.json()
         except Exception as e:
             logger.error(f"Sign in failed: {e}")
+            raise
+
+    def admin_update_user(self, user_id: str, attributes: dict) -> dict:
+        """Update a Supabase Auth user via Admin API (requires service role key)."""
+        url = f"{self.url}/auth/v1/admin/users/{user_id}"
+        try:
+            response = self.client.put(url, headers=self.headers, json=attributes)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Admin update user failed: {e}")
+            raise
+
+    def admin_delete_user(self, user_id: str, should_soft_delete: bool = False) -> dict:
+        """Delete a Supabase Auth user via Admin API (requires service role key)."""
+        url = f"{self.url}/auth/v1/admin/users/{user_id}"
+        params = {"should_soft_delete": "true" if should_soft_delete else "false"}
+        try:
+            response = self.client.delete(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            if response.text:
+                return response.json()
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Admin delete user failed: {e}")
             raise
 
     def close(self):

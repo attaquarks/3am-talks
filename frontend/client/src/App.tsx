@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import About from "./pages/About";
 import LearnMore from "./pages/LearnMore";
 import NotFound from "./pages/NotFound";
+import OAuthSuccess from "./pages/OAuthSuccess";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ function App() {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/about" element={<About />} />
                 <Route path="/learn-more" element={<LearnMore />} />
+                <Route path="/auth/oauth-success" element={<OAuthSuccess />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AuthWrapper>

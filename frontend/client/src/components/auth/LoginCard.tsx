@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthMode } from '@/types/auth';
-import { Mail, Lock, User, ArrowRight, Github, Chrome, Loader2, Sparkles } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Chrome, Facebook, Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import { getSupabaseBrowser } from '@/lib/supabaseBrowser';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const LoginCard: React.FC = () => {
@@ -15,6 +16,21 @@ const LoginCard: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
     const navigate = useNavigate();
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const oauthError = params.get('oauth_error');
+        if (oauthError) {
+            toast({
+                title: "Login failed",
+                description: oauthError,
+                variant: "destructive",
+            });
+            params.delete('oauth_error');
+            const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+            window.history.replaceState({}, '', next);
+        }
+    }, [toast]);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -55,90 +71,40 @@ const LoginCard: React.FC = () => {
         }
     };
 
-    const handleSocialLogin = async (provider: 'google' | 'github') => {
-        setIsLoading(true);
+    const handleSocialLogin = async (provider: 'google' | 'facebook') => {
+        // #region agent log
+        fetch('http://127.0.0.1:7498/ingest/de8af993-af91-47ad-aef8-03b59e70199a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a2dded'},body:JSON.stringify({sessionId:'a2dded',location:'LoginCard.tsx:handleSocialLogin',message:'oauth signInWithOAuth',data:{provider,origin:window.location.origin,flow:'pkce'},hypothesisId:'verify',runId:'post-fix',timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         try {
-            // Mock social login for local development
-            const response = await fetch('/api/auth/social', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: `mock-${provider}@example.com`,
-                    name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)} User`,
-                    provider
-                })
+            const supabase = getSupabaseBrowser();
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider,
+                options: {
+                    redirectTo: `${window.location.origin}/auth/oauth-success`,
+                },
             });
-
-            if (!response.ok) throw new Error('Social login failed');
-
+            if (error) {
+                toast({
+                    title: 'Login failed',
+                    description: error.message,
+                    variant: 'destructive',
+                });
+            }
+        } catch (e: any) {
             toast({
-                title: "Social Login Success",
-                description: `Authenticated via Mock ${provider}`,
+                title: 'Login failed',
+                description: e?.message ?? 'OAuth is not configured (add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env).',
+                variant: 'destructive',
             });
-
-            await refetchUser();
-            navigate('/dashboard');
-        } catch (error: any) {
-            toast({
-                title: "Login Error",
-                description: error.message,
-                variant: "destructive",
-            });
-        } finally {
-            setIsLoading(false);
         }
     };
 
     const handleDemoLogin = async () => {
-        setIsLoading(true);
-        try {
-            const response = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: 'demo@example.com',
-                    password: 'demo-password-123'
-                }),
-            });
-
-            if (response.status === 401 || response.status === 404) {
-                // Try registering the demo account if login fails
-                const regResponse = await fetch('/api/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: 'demo@example.com',
-                        password: 'demo-password-123',
-                        name: 'Demo User'
-                    }),
-                });
-
-                if (!regResponse.ok) throw new Error('Demo login failed');
-
-                toast({
-                    title: "Demo Account Created",
-                    description: "You've been logged in with a demo account.",
-                });
-            } else if (!response.ok) {
-                throw new Error('Demo login failed');
-            } else {
-                toast({
-                    title: "Welcome Back",
-                    description: "Logged in as Demo User.",
-                });
-            }
-
-            await refetchUser();
-            navigate('/dashboard');
-        } catch (error: any) {
-            toast({
-                title: "Demo Login Error",
-                description: error.message,
-                variant: "destructive",
-            });
-        } finally {
-            setIsLoading(false);
-        }
+        toast({
+            title: "Demo Login Disabled",
+            description: "Demo account shortcuts are disabled in production mode.",
+            variant: "destructive",
+        });
     };
 
     return (
@@ -294,11 +260,11 @@ const LoginCard: React.FC = () => {
                     </button>
                     <button
                         type="button"
-                        onClick={() => handleSocialLogin('github')}
+                        onClick={() => handleSocialLogin('facebook')}
                         className="flex items-center justify-center gap-3 bg-background hover:bg-muted border border-border py-4 rounded-2xl transition-all hover:shadow-lg shadow-primary/5 active:scale-95"
                     >
-                        <Github size={18} className="text-foreground" />
-                        <span className="text-xs font-bold text-foreground/80 uppercase tracking-widest">Github</span>
+                        <Facebook size={18} className="text-foreground" />
+                        <span className="text-xs font-bold text-foreground/80 uppercase tracking-widest">Facebook</span>
                     </button>
                 </div>
 

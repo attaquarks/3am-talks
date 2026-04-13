@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, X, Sparkles, Send, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,14 +17,21 @@ const QuickSupport: React.FC = () => {
         setInput('');
 
         try {
-            const { data, error } = await supabase.functions.invoke('ai-chat', {
-                body: {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
                     message: userMessage,
-                    is_quick_support: true // Flag to indicate a shorter, quicker response
-                }
+                    conversation_id: null,
+                    conversation_history: []
+                }),
             });
 
-            if (error) throw error;
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData?.message || 'Quick support request failed');
+            }
+            const data = await response.json();
 
             const aiResponse = data?.response || data?.content || "I'm here for you. Take a deep breath.";
             setMessage(aiResponse);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  envDir: path.resolve(__dirname, ".."),
   plugins: [
     react(),
   ],
@@ -13,7 +14,8 @@ export default defineConfig({
     host: "localhost",
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:5050", changeOrigin: true },
+      // 127.0.0.1 avoids localhost → ::1 vs 127.0.0.1 mismatches with the API listener
+      "/api": { target: "http://127.0.0.1:5050", changeOrigin: true, secure: false },
     },
   },
   resolve: {

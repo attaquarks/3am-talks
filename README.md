@@ -12,14 +12,14 @@
 ## Tech Overview
 
 - **Backend**: Python with FastAPI; conversation logic, personality assessment (BERT-based), and RAG (Pinecone) for technique retrieval.
-- **AI**: Local LLM via Ollama (e.g. PsychoCounsel) for private, on-device generation.
+- **AI**: OpenAI-compatible LLM endpoint via `COLAB_API_URL` (psychocounsel model served remotely).
 - **Data**: Supabase for user profiles, conversations, and messages (configurable via environment variables).
 
 ## Getting Started
 
 1. Install Python dependencies from `requirements.txt`.
 2. Set up a `.env` file with your Supabase and Pinecone credentials (and any other required keys).
-3. Run Ollama and load the therapy model (e.g. PsychoCounsel).
+3. Set `COLAB_API_URL` in `.env` to your OpenAI-compatible model endpoint.
 4. Start the backend API and the frontend (see `start.bat` / `start.sh` for your environment).
 
 For detailed setup, refer to the project’s environment and run scripts in the repo.

@@ -4,8 +4,7 @@
 # Prerequisites:
 #   - Python venv activated with deps installed (pip install -r requirements.txt)
 #   - Node.js deps installed (cd frontend && npm install)
-#   - Ollama running with psychocounsel model (ollama run psychocounsel)
-#   - .env configured with SUPABASE_URL, SUPABASE_KEY, PINECONE_API_KEY
+#   - .env configured with SUPABASE_URL, SUPABASE_KEY, PINECONE_API_KEY, COLAB_API_URL
 
 set -e
 

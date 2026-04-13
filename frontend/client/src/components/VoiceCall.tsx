@@ -19,9 +19,18 @@ import { useVoiceCall } from "@/hooks/useVoiceCall";
 
 function VoiceAssistantVisualizer() {
   const { state, audioTrack } = useVoiceAssistant();
-  const { microphoneTrack } = useLocalParticipant();
+  const { microphoneTrack, localParticipant } = useLocalParticipant();
 
-  const trackToVisualize = state === "speaking" ? audioTrack : microphoneTrack;
+  const trackToVisualize =
+    state === "speaking"
+      ? audioTrack
+      : microphoneTrack
+      ? {
+          participant: localParticipant,
+          publication: microphoneTrack,
+          source: "microphone" as const,
+        }
+      : undefined;
 
   const stateLabel: Record<string, string> = {
     connecting: "Connecting…",
@@ -33,12 +42,14 @@ function VoiceAssistantVisualizer() {
   return (
     <div className="flex flex-col items-center justify-center gap-4">
       <div className="h-32 w-full max-w-xs">
-        <BarVisualizer
-          state={state}
-          barCount={5}
-          trackRef={trackToVisualize}
-          className="h-full w-full"
-        />
+        {trackToVisualize && (
+          <BarVisualizer
+            state={state}
+            barCount={5}
+            track={trackToVisualize}
+            className="h-full w-full"
+          />
+        )}
       </div>
       <p className="text-sm text-muted-foreground animate-pulse">
         {stateLabel[state] ?? state}

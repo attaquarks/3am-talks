@@ -2,7 +2,7 @@ from typing import Dict, Optional, List
 from datetime import datetime
 import logging
 import uuid
-from .supabase_client import SupabaseClient
+from .supabase_client import SupabaseClient, normalize_postgrest_value
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,7 @@ class UserService:
     def get_conversation(self, conversation_id: str) -> Optional[dict]:
         """Get conversation by ID"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             conversations = self.db.select(
                 "conversations",
                 filters={"conversation_id": f"eq.{conversation_id}"}
@@ -169,6 +170,7 @@ class UserService:
     def end_conversation(self, conversation_id: str) -> dict:
         """Mark a conversation as ended"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             updated_conversation = self.db.update(
                 "conversations",
                 {
@@ -191,6 +193,7 @@ class UserService:
     ) -> dict:
         """Update conversation turn count"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             conversation = self.get_conversation(conversation_id)
             if not conversation:
                 raise ValueError(f"Conversation {conversation_id} not found")
@@ -228,6 +231,7 @@ class UserService:
     ) -> dict:
         """Add a message to a conversation"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             message_data = {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
@@ -256,6 +260,7 @@ class UserService:
     ) -> List[dict]:
         """Get conversation message history"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             filters = {"conversation_id": f"eq.{conversation_id}"}
             
             messages = self.db.select(
@@ -309,6 +314,7 @@ class UserService:
     def should_update_personality(self, conversation_id: str, update_interval: int = 40) -> bool:
         """Check if personality should be updated based on turn count"""
         try:
+            conversation_id = normalize_postgrest_value(conversation_id)
             conversation = self.get_conversation(conversation_id)
             if not conversation:
                 return False
