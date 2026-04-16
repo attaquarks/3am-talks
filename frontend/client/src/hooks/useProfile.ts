@@ -7,6 +7,7 @@ interface Profile {
   name: string;
   mood_preference: string;
   emergency_contact?: string;
+  phone?: string;
   deleted?: boolean;
   created_at: string;
   updated_at: string;
@@ -53,7 +54,7 @@ export function useProfile() {
     }
   };
 
-  const updateProfile = async (updates: Partial<Pick<Profile, 'name' | 'mood_preference' | 'emergency_contact'>>) => {
+  const updateProfile = async (updates: Partial<Pick<Profile, 'name' | 'mood_preference' | 'emergency_contact' | 'phone'>>) => {
     try {
       const response = await fetch('/api/data/profiles', {
         method: 'POST', // Using POST for creation/update as per api.py

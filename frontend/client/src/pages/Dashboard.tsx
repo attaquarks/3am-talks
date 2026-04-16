@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { Calendar } from "@/components/ui/calendar";
+import HomeworkCard from "@/components/patient/HomeworkCard";
 
 // Add/extend MoodEntry type for prompt and prompt_answer
 type MoodEntry = {
@@ -289,22 +290,22 @@ export default function Dashboard() {
   ].filter(Boolean);
 
   return (
-    <div className="min-h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-x-hidden">
+    <div className="h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-hidden">
       <BackgroundDecor />
       <Navigation />
-      <main className="container relative z-10 mx-auto px-4 py-8 pb-20 md:pb-8">
+      <main className="flex-1 min-h-0 overflow-y-auto container relative z-10 mx-auto px-4 py-4 pb-20 md:pb-4">
         {/* Welcome Section */}
-        <div className="mb-8 animate-fade-in-up">
-          <h1 className="text-3xl font-bold text-foreground mb-2">
+        <div className="mb-4 animate-fade-in-up">
+          <h1 className="text-2xl font-bold text-foreground mb-1">
             Welcome back, {profileLoading ? '...' : (profile?.name || 'User')} 👋
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Ready to continue your mental health journey?
           </p>
         </div>
 
         {/* Quick Actions */}
-        <div className="grid md:grid-cols-3 gap-4 mb-8 animate-fade-in-up delay-100">
+        <div className="grid md:grid-cols-3 gap-3 mb-4 animate-fade-in-up delay-100">
           <Link to="/therapist">
             <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300">
               <CardContent className="p-6">
@@ -352,47 +353,42 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-2 gap-3 mb-4">
           {/* Mood Calendar */}
           <Card className="animate-fade-in-up delay-200">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <CalendarIcon className="h-5 w-5 text-primary" />
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center space-x-2 text-base">
+                <CalendarIcon className="h-4 w-4 text-primary" />
                 <span>This Month's Journey</span>
               </CardTitle>
-              <CardDescription>
-                Track your daily mood and progress
-              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {/* Real mood entries */}
+              <div className="space-y-2 max-h-40 overflow-y-auto">
                 {moodLoading ? (
-                  <div className="text-center py-4 text-muted-foreground">Loading mood entries...</div>
+                  <div className="text-center py-2 text-muted-foreground text-sm">Loading...</div>
                 ) : moodEntries.length === 0 ? (
-                  <div className="text-center py-4 text-muted-foreground">No mood entries yet</div>
+                  <div className="text-center py-2 text-muted-foreground text-sm">No mood entries yet</div>
                 ) : (
-                  moodEntries.map((entry) => (
+                  moodEntries.slice(0, 5).map((entry) => (
                     <div
                       key={entry.id}
-                      className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2">
                         {getMoodIcon(entry.mood)}
                         <div>
                           <p className="text-sm font-medium text-foreground">
                             {new Date(entry.date).toLocaleDateString()}
                           </p>
-                          <p className="text-xs text-muted-foreground">{entry.note || 'No note'}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{entry.note || 'No note'}</p>
                         </div>
                       </div>
                     </div>
                   ))
                 )}
               </div>
-
-              <Button variant="outline" className="w-full mt-4" onClick={() => setShowFullCalendar(true)}>
-                <CalendarIcon className="mr-2 h-4 w-4" />
+              <Button variant="outline" size="sm" className="w-full mt-2" onClick={() => setShowFullCalendar(true)}>
+                <CalendarIcon className="mr-2 h-3 w-3" />
                 View Full Calendar
               </Button>
             </CardContent>
@@ -400,52 +396,38 @@ export default function Dashboard() {
 
           {/* Daily Check-in */}
           <Card className="animate-fade-in-up delay-300">
-            <CardHeader>
-              <CardTitle>Today's Check-in</CardTitle>
-              <CardDescription>
-                How are you feeling right now?
-              </CardDescription>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Today's Check-in</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="text-center py-8">
-                  <div className="w-20 h-20 bg-gradient-hero rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-soft">
-                    <MessageCircle className="h-8 w-8 text-primary" />
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Haven't checked in today yet
-                  </p>
-                  <Button variant="hero" size="lg" className="w-full" onClick={() => setShowCheckinModal(true)}>
-                    Quick Check-in
-                  </Button>
+              <div className="text-center py-4">
+                <div className="w-14 h-14 bg-gradient-hero rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse-soft">
+                  <MessageCircle className="h-6 w-6 text-primary" />
                 </div>
-
-                <div className="border-t border-border pt-4">
-                  <h4 className="font-medium text-foreground mb-2">Recent Activity</h4>
-                  <div className="space-y-2">
-                    {statsLoading ? (
-                      <p className="text-sm text-muted-foreground">Loading stats...</p>
-                    ) : stats ? (
-                      <>
-                        <p className="text-sm text-muted-foreground">
-                          🌟 {stats.current_streak} days conversation streak
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          📊 Mood improved {stats.mood_improvement_percentage}% this week
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          💝 Total sessions: {stats.total_sessions}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No activity data yet</p>
-                    )}
-                  </div>
+                <Button variant="hero" className="w-full mb-3" onClick={() => setShowCheckinModal(true)}>
+                  Quick Check-in
+                </Button>
+              </div>
+              <div className="border-t border-border pt-3">
+                <h4 className="font-medium text-foreground mb-1 text-sm">Recent Activity</h4>
+                <div className="space-y-1">
+                  {statsLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading...</p>
+                  ) : stats ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">{stats.current_streak} days streak · {stats.total_sessions} sessions</p>
+                      <p className="text-xs text-muted-foreground">Mood improved {stats.mood_improvement_percentage}% this week</p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No activity data yet</p>
+                  )}
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
+
+        <HomeworkCard />
       </main>
 
       <Dialog open={showMoodJournal} onOpenChange={setShowMoodJournal}>

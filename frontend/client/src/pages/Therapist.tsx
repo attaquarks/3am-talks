@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTheme } from "@/components/ThemeProvider";
+import { CrisisCountdownModal } from "@/components/CrisisCountdownModal";
 
 interface Message {
   id: string;
@@ -23,6 +24,7 @@ interface Message {
   content: string;
   is_user: boolean;
   created_at: string;
+  is_crisis?: boolean;
 }
 
 interface Conversation {
@@ -47,6 +49,7 @@ export default function Therapist() {
   const [currentMood, setCurrentMood] = useState<'happy' | 'neutral' | 'sad'>('neutral');
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [countdownState, setCountdownState] = useState<{ open: boolean; seconds: number }>({ open: false, seconds: 30 });
   const [sessionDuration, setSessionDuration] = useState(0);
   const [showSidebar, setShowSidebar] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -161,29 +164,22 @@ export default function Therapist() {
 
   const generateSummary = (messages: Message[]): string => {
     const userMessages = messages.filter(m => m.is_user).map(m => m.content);
-    if (userMessages.length === 0) return "New conversation started";
+    if (userMessages.length === 0) return "New chat";
 
     const allText = userMessages.join(' ').toLowerCase();
 
-    // Simple keyword-based summary
     const topics = [];
     if (allText.includes('work') || allText.includes('job') || allText.includes('career')) topics.push('work');
     if (allText.includes('relationship') || allText.includes('partner') || allText.includes('family')) topics.push('relationships');
     if (allText.includes('anxiety') || allText.includes('stress') || allText.includes('worry')) topics.push('anxiety');
-    if (allText.includes('depression') || allText.includes('sad') || allText.includes('down')) topics.push('depression');
+    if (allText.includes('depression') || allText.includes('sad') || allText.includes('down')) topics.push('mood');
     if (allText.includes('sleep') || allText.includes('tired') || allText.includes('rest')) topics.push('sleep');
-    if (allText.includes('health') || allText.includes('exercise') || allText.includes('fitness')) topics.push('health');
 
     if (topics.length > 0) {
-      return `Discussed ${topics.slice(0, 2).join(', ')}`;
+      return topics.slice(0, 2).join(" & ") + " talk";
     }
 
-    // Fallback to first few words of first message
-    const firstMessage = userMessages[0];
-    if (firstMessage.length > 20) {
-      return firstMessage.substring(0, 20) + '...';
-    }
-    return firstMessage;
+    return userMessages[0].split(/\s+/).slice(0, 5).join(" ");
   };
 
   const extractTagsFromMessages = (userMessages: string[]) => {
@@ -341,8 +337,14 @@ export default function Therapist() {
 
       if (!currentConversationId) {
         setCurrentConversationId(activeConversationId);
-        // Since it's a new conversation, we should reload the list or fetch the new conversation details
-        // For now, reload list to keep it simple
+
+        const title = generateTitle(userMessage);
+        fetch(`/api/data/conversations/${activeConversationId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title })
+        }).catch(() => {});
+
         loadConversations();
 
         // Update user stats for new session
@@ -358,9 +360,15 @@ export default function Therapist() {
         conversation_id: activeConversationId || 'temp', // Should be valid now
         content: aiMessageContent,
         is_user: false,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        is_crisis: !!data.crisis?.detected,
       };
       setMessages(prev => [...prev, aiMsg]);
+
+      // If a cancellable countdown was kicked off server-side, open the modal.
+      if (data.crisis?.countdown?.seconds) {
+        setCountdownState({ open: true, seconds: data.crisis.countdown.seconds });
+      }
 
     } catch (error) {
       console.error('Error sending message:', error);
@@ -429,167 +437,138 @@ export default function Therapist() {
     return conversations.find(c => c.id === currentConversationId);
   };
 
+  const deleteConversation = async (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/data/conversations/${conversationId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      if (currentConversationId === conversationId) {
+        setCurrentConversationId(null);
+        setMessages([]);
+      }
+      setConversations(prev => prev.filter(c => c.id !== conversationId));
+      toast({ title: "Deleted", description: "Conversation removed." });
+    } catch {
+      toast({ title: "Error", description: "Failed to delete conversation.", variant: "destructive" });
+    }
+  };
+
+  const generateTitle = (text: string): string => {
+    const words = text.trim().split(/\s+/).slice(0, 5).join(" ");
+    return words.length > 30 ? words.substring(0, 30) + "…" : words;
+  };
+
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 relative">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 relative flex flex-col">
       <BackgroundDecor />
       <Navigation />
       <MobileNavigation />
 
-      <div className="container mx-auto px-4 py-8 max-w-7xl h-full">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
+      <div className="flex-1 min-h-0 container mx-auto px-4 py-2 max-w-7xl">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 h-full">
           {/* Conversations Sidebar */}
           <div className={cn(
-            "lg:col-span-1 transition-all duration-300 ease-in-out",
+            "lg:col-span-1 min-h-0",
             showSidebar ? "block" : "hidden lg:block"
           )}>
-            <Card className="h-full bg-card/50 backdrop-blur-sm border-border/50 shadow-xl">
-              <CardContent className="p-6 h-full flex flex-col">
-                {/* Header */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-8 h-8 bg-gradient-to-r from-primary to-primary/70 rounded-lg flex items-center justify-center">
-                      <MessageCircle className="w-4 h-4 text-primary-foreground" />
-                    </div>
-                    <h2 className="text-lg font-semibold text-foreground">Conversations</h2>
+            <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border border-border/50 shadow-xl rounded-xl">
+              <div className="flex items-center justify-between p-4 border-b border-border/50">
+                <div className="flex items-center space-x-2">
+                  <div className="w-7 h-7 bg-gradient-to-r from-primary to-primary/70 rounded-lg flex items-center justify-center">
+                    <MessageCircle className="w-3.5 h-3.5 text-primary-foreground" />
                   </div>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          onClick={startNewConversation}
-                          size="sm"
-                          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl transition-all duration-200"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Start new conversation</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <h2 className="text-sm font-semibold text-foreground">Chats</h2>
                 </div>
+                <Button onClick={startNewConversation} size="sm" variant="ghost" className="h-7 w-7 p-0">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
 
-                {/* Conversations List */}
-                <div className="flex-1 overflow-y-auto pr-2">
-                  <div className="space-y-3">
-                    {conversations.length === 0 ? (
-                      <div className="text-center py-8">
-                        <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mx-auto mb-3">
-                          <MessageCircle className="w-6 h-6 text-muted-foreground" />
-                        </div>
-                        <p className="text-sm text-muted-foreground">No conversations yet</p>
-                        <p className="text-xs text-muted-foreground mt-1">Start chatting to see your history</p>
-                      </div>
-                    ) : (
-                      conversations.map((conversation) => (
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="p-2 space-y-1">
+                  {conversations.length === 0 ? (
+                    <div className="text-center py-8 px-4">
+                      <MessageCircle className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-xs text-muted-foreground">No conversations yet</p>
+                    </div>
+                  ) : (
+                    conversations.map((conversation) => {
+                      const title = conversation.title || "New chat";
+                      const shortTitle = title.split(/\s+/).slice(0, 5).join(" ") + (title.split(/\s+/).length > 5 ? "…" : "");
+                      return (
                         <div
                           key={conversation.id}
                           onClick={() => selectConversation(conversation)}
                           className={cn(
-                            "group p-4 rounded-xl cursor-pointer transition-all duration-200 hover:shadow-md",
+                            "group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-all duration-150",
                             currentConversationId === conversation.id
-                              ? "bg-primary/10 border border-primary/20 shadow-md"
-                              : "bg-card/50 hover:bg-card border border-border/50"
+                              ? "bg-primary/10 border border-primary/20"
+                              : "hover:bg-muted/50 border border-transparent"
                           )}
                         >
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">
-                                {conversation.title || "New Conversation"}
-                              </h3>
-                            </div>
-                            <div className="flex items-center space-x-1 ml-2">
-                              {conversation.mood && getMoodIcon(conversation.mood)}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>{new Date(conversation.created_at).toLocaleDateString()}</span>
-                            <span className="flex items-center space-x-1">
-                              <Clock className="w-3 h-3" />
-                              {formatDuration(conversation.duration_minutes || 0)}
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm text-foreground truncate group-hover:text-primary transition-colors">
+                              {shortTitle}
+                            </h3>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(conversation.created_at).toLocaleDateString()}
                             </span>
                           </div>
-
-                          {conversation.tags && conversation.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {conversation.tags.slice(0, 2).map((tag, index) => (
-                                <Badge key={index} variant="secondary" className="text-xs">
-                                  {tag}
-                                </Badge>
-                              ))}
-                              {conversation.tags.length > 2 && (
-                                <Badge variant="outline" className="text-xs">
-                                  +{conversation.tags.length - 2}
-                                </Badge>
-                              )}
-                            </div>
-                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-1 text-muted-foreground hover:text-destructive"
+                            onClick={(e) => deleteConversation(e, conversation.id)}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
                         </div>
-                      ))
-                    )}
-                  </div>
+                      );
+                    })
+                  )}
                 </div>
-              </CardContent>
-            </Card>
+              </ScrollArea>
+            </div>
           </div>
 
           {/* Chat Area */}
-          <div className="lg:col-span-3">
-            <Card className="h-full bg-card/50 backdrop-blur-sm border-border/50 shadow-xl overflow-hidden">
+          <div className="lg:col-span-3 min-h-0">
+            <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border border-border/50 shadow-xl rounded-xl overflow-hidden">
               {/* Chat Header */}
-              <div className="p-6 border-b border-border/50 bg-gradient-to-r from-card to-card/80">
+              <div className="px-4 py-3 border-b border-border/50 bg-gradient-to-r from-card to-card/80 flex-shrink-0">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-3">
                     <div className="relative">
-                      <Avatar className="w-12 h-12 ring-2 ring-primary/20">
+                      <Avatar className="w-10 h-10 ring-2 ring-primary/20">
                         <AvatarImage src="/ella-avatar.png" />
                         <AvatarFallback className="bg-gradient-to-r from-primary to-primary/70 text-primary-foreground">
-                          <Bot className="w-6 h-6" />
+                          <Bot className="w-5 h-5" />
                         </AvatarFallback>
                       </Avatar>
-                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-background"></div>
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-background"></div>
                     </div>
                     <div>
-                      <h1 className="text-xl font-bold text-foreground flex items-center space-x-2">
+                      <h1 className="text-lg font-bold text-foreground flex items-center space-x-2">
                         <span>ELLA</span>
-                        <Sparkles className="w-5 h-5 text-primary animate-pulse" />
+                        <Sparkles className="w-4 h-4 text-primary animate-pulse" />
                       </h1>
-                      <p className="text-sm text-muted-foreground">Your AI Therapist & Mental Health Companion</p>
-                      {sessionStartTime && (
-                        <div className="flex items-center text-xs text-muted-foreground mt-1">
-                          <Clock className="w-3 h-3 mr-1" />
-                          Session: {sessionDuration}m
-                        </div>
-                      )}
+                      <p className="text-xs text-muted-foreground">AI Therapist & Mental Health Companion</p>
                     </div>
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    {currentMood && (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="p-2 rounded-full bg-muted/50">
-                              {getMoodIcon(currentMood)}
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Current mood: {currentMood}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                    {sessionStartTime && (
+                      <div className="flex items-center text-xs text-muted-foreground px-2 py-1 bg-muted/50 rounded-full">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {sessionDuration}m
+                      </div>
                     )}
-
-                    {/* Voice call — Talk to Ella */}
                     <VoiceCall />
-
                     <Button
                       onClick={() => setShowSidebar(!showSidebar)}
                       variant="outline"
                       size="sm"
-                      className="lg:hidden"
+                      className="lg:hidden h-8 w-8 p-0"
                     >
                       <ArrowLeft className="w-4 h-4" />
                     </Button>
@@ -598,16 +577,16 @@ export default function Therapist() {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto h-[calc(100vh-280px)] relative" onScroll={handleScroll}>
-                <div className="p-6 space-y-6" ref={messagesEndRef}>
+              <div className="flex-1 min-h-0 overflow-y-auto relative" onScroll={handleScroll}>
+                <div className="p-4 space-y-4" ref={messagesEndRef}>
                   {messages.length === 0 ? (
                     <div className="text-center py-12">
-                      <div className="w-20 h-20 bg-gradient-to-r from-primary/10 to-primary/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <MessageCircle className="w-10 h-10 text-primary" />
+                      <div className="w-16 h-16 bg-gradient-to-r from-primary/10 to-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <MessageCircle className="w-8 h-8 text-primary" />
                       </div>
-                      <h3 className="text-xl font-semibold text-foreground mb-2">Welcome to ELLA</h3>
-                      <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-                        I'm here to support your mental health journey. Share your thoughts, feelings, or concerns, and I'll help you work through them.
+                      <h3 className="text-lg font-semibold text-foreground mb-2">Welcome to ELLA</h3>
+                      <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
+                        Share your thoughts, feelings, or concerns and I'll help you work through them.
                       </p>
                       <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
                         {[
@@ -629,19 +608,17 @@ export default function Therapist() {
                       </div>
                     </div>
                   ) : (
-                    messages.map((msg, index) => (
+                    messages.map((msg) => (
                       <div
                         key={msg.id}
                         className={cn(
-                          "flex items-start space-x-3 animate-in fade-in-0 slide-in-from-bottom-2 duration-300",
+                          "flex items-start space-x-3",
                           msg.is_user ? "flex-row-reverse space-x-reverse" : ""
                         )}
                       >
                         <Avatar className={cn(
-                          "w-8 h-8 ring-2",
-                          msg.is_user
-                            ? "ring-primary/20"
-                            : "ring-primary/10"
+                          "w-7 h-7 ring-2 flex-shrink-0",
+                          msg.is_user ? "ring-primary/20" : "ring-primary/10"
                         )}>
                           <AvatarFallback className={cn(
                             "text-xs",
@@ -649,59 +626,44 @@ export default function Therapist() {
                               ? "bg-primary text-primary-foreground"
                               : "bg-muted text-muted-foreground"
                           )}>
-                            {msg.is_user ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                            {msg.is_user ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
                           </AvatarFallback>
                         </Avatar>
 
                         <div className={cn(
-                          "flex-1 max-w-[80%] space-y-2",
+                          "max-w-[80%] space-y-1",
                           msg.is_user ? "text-right" : ""
                         )}>
                           <div className={cn(
-                            "group relative rounded-2xl px-4 py-3 shadow-sm transition-all duration-200",
+                            "group relative rounded-2xl px-4 py-2.5 shadow-sm",
                             msg.is_user
                               ? "bg-primary text-primary-foreground ml-auto"
-                              : "bg-muted/50 text-foreground"
+                              : msg.is_crisis
+                                ? "bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-900/60 text-foreground"
+                                : "bg-muted/50 text-foreground"
                           )}>
+                            {msg.is_crisis && !msg.is_user && (
+                              <div className="text-xs font-semibold text-rose-600 dark:text-rose-400 mb-1 flex items-center gap-1">
+                                Safety response
+                              </div>
+                            )}
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-
-                            {/* Message Actions */}
                             <div className={cn(
-                              "absolute top-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200",
-                              msg.is_user ? "left-2" : "right-2"
+                              "absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity",
+                              msg.is_user ? "left-1" : "right-1"
                             )}>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-6 w-6 p-0"
-                                      onClick={() => copyMessage(msg.content, msg.id)}
-                                    >
-                                      {copiedMessageId === msg.id ? (
-                                        <Check className="w-3 h-3" />
-                                      ) : (
-                                        <Copy className="w-3 h-3" />
-                                      )}
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Copy message</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-5 w-5 p-0"
+                                onClick={() => copyMessage(msg.content, msg.id)}
+                              >
+                                {copiedMessageId === msg.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                              </Button>
                             </div>
                           </div>
-
-                          <div className={cn(
-                            "text-xs text-muted-foreground",
-                            msg.is_user ? "text-right" : "text-left"
-                          )}>
-                            {new Date(msg.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                          <div className={cn("text-xs text-muted-foreground", msg.is_user ? "text-right" : "text-left")}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </div>
                       </div>
@@ -709,94 +671,66 @@ export default function Therapist() {
                   )}
 
                   {isLoading && (
-                    <div className="flex items-start space-x-3 animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
-                      <Avatar className="w-8 h-8 ring-2 ring-primary/10">
+                    <div className="flex items-start space-x-3">
+                      <Avatar className="w-7 h-7 ring-2 ring-primary/10">
                         <AvatarFallback className="bg-muted text-muted-foreground">
-                          <Bot className="w-4 h-4" />
+                          <Bot className="w-3.5 h-3.5" />
                         </AvatarFallback>
                       </Avatar>
-                      <div className="flex-1 max-w-[80%]">
-                        <div className="bg-muted/50 rounded-2xl px-4 py-3 shadow-sm">
-                          <div className="flex space-x-1">
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                          </div>
+                      <div className="bg-muted/50 rounded-2xl px-4 py-3 shadow-sm">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                          <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                         </div>
                       </div>
                     </div>
                   )}
-
                 </div>
 
-                {/* Scroll to bottom button */}
                 {showScrollButton && messages.length > 0 && (
-                  <div className="absolute bottom-4 right-4">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            onClick={scrollToBottom}
-                            size="sm"
-                            className="w-10 h-10 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-all duration-200"
-                          >
-                            <ChevronDown className="w-4 h-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Scroll to bottom</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
+                  <Button
+                    onClick={scrollToBottom}
+                    size="sm"
+                    className="absolute bottom-3 right-3 w-8 h-8 rounded-full bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg p-0"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
                 )}
               </div>
 
               {/* Input Area */}
-              <div className="p-6 border-t border-border/50 bg-gradient-to-r from-card/80 to-card">
-                <div className="flex items-end space-x-3">
-                  <div className="flex-1 relative">
-                    <Input
-                      ref={inputRef}
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      placeholder="Share your thoughts, feelings, or concerns..."
-                      className="pr-12 py-3 text-sm resize-none border-border/50 focus:border-primary/50 transition-all duration-200"
-                      disabled={isLoading}
-                    />
-                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                      <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-                        <span>Enter to send</span>
-                        <div className="w-1 h-1 bg-muted-foreground rounded-full"></div>
-                        <span>Shift+Enter for new line</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          onClick={sendMessage}
-                          disabled={!message.trim() || isLoading}
-                          size="lg"
-                          className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl transition-all duration-200 px-6"
-                        >
-                          <Send className="w-4 h-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Send message</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+              <div className="px-4 py-3 border-t border-border/50 bg-card/80 flex-shrink-0">
+                <div className="flex items-center space-x-2">
+                  <Input
+                    ref={inputRef}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Share your thoughts…"
+                    className="flex-1 py-2.5 text-sm border-border/50 focus:border-primary/50"
+                    disabled={isLoading}
+                  />
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!message.trim() || isLoading}
+                    size="sm"
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md px-4 h-9"
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
-            </Card>
+            </div>
           </div>
         </div>
       </div>
+
+      <CrisisCountdownModal
+        open={countdownState.open}
+        seconds={countdownState.seconds}
+        onClose={() => setCountdownState((s) => ({ ...s, open: false }))}
+      />
     </div>
   );
 }

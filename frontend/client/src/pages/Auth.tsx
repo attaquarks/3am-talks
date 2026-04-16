@@ -2,13 +2,19 @@ import React, { useState } from 'react';
 import BackgroundDecor from '@/components/auth/BackgroundDecor';
 import LoginCard from '@/components/auth/LoginCard';
 import QuickSupport from '@/components/auth/QuickSupport';
-import { Wind, X, Mail, Lock, LogIn, ChevronRight, Sparkles } from 'lucide-react';
+import { Wind, X, Mail, Lock, LogIn, ChevronRight, Sparkles, Stethoscope, BadgeCheck, Users, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+
+type AuthRole = 'patient' | 'therapist';
 
 const Auth: React.FC = () => {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const location = useLocation();
+  const initialRole: AuthRole = location.pathname === '/auth/therapist' ? 'therapist' : 'patient';
+  const [role, setRole] = useState<AuthRole>(initialRole);
+  const isTherapist = role === 'therapist';
 
   return (
     <div className="min-h-screen relative flex flex-col items-center bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-x-hidden">
@@ -57,41 +63,103 @@ const Auth: React.FC = () => {
             transition={{ delay: 0.2 }}
             className="flex-1 max-w-xl text-center md:text-left"
           >
-            <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-card border border-primary/20 text-primary text-[10px] font-black uppercase tracking-[0.2em] mb-10 shadow-xl shadow-primary/10">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
-              </span>
-              Presence Indicated
-            </div>
+            <AnimatePresence mode="wait">
+              {isTherapist ? (
+                <motion.div
+                  key="therapist-info"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.35 }}
+                >
+                  <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-card border border-secondary/30 text-secondary-foreground text-[10px] font-black uppercase tracking-[0.2em] mb-10 shadow-xl shadow-secondary/10">
+                    <Stethoscope className="w-3.5 h-3.5 text-secondary-foreground" />
+                    Clinician Network
+                  </div>
 
-            <h2 className="text-5xl md:text-7xl font-black text-foreground leading-[1.05] mb-10 tracking-tighter">
-              Your path to <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">emotional clarity</span> <br />
-              starts here.
-            </h2>
+                  <h2 className="text-5xl md:text-7xl font-black text-foreground leading-[1.05] mb-10 tracking-tighter">
+                    Care for your <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">patients, smarter.</span>
+                  </h2>
 
-            <div className="space-y-8">
-              <div className="flex items-start gap-6 group">
-                <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
-                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                </div>
-                <div>
-                  <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Private Sanctuary</h4>
-                  <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Military-grade encryption ensures your thoughts and sessions are kept completely confidential.</p>
-                </div>
-              </div>
+                  <div className="space-y-8">
+                    <div className="flex items-start gap-6 group">
+                      <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
+                        <Users className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Context-Rich Caseload</h4>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">See mood trends, session history, and AI-generated SOAP summaries — with the patient's explicit consent, always.</p>
+                      </div>
+                    </div>
 
-              <div className="flex items-start gap-6 group">
-                <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
-                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
-                </div>
-                <div>
-                  <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Resonant AI</h4>
-                  <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Built on validated psychological models to provide genuine, compassionate emotional support.</p>
-                </div>
-              </div>
-            </div>
+                    <div className="flex items-start gap-6 group">
+                      <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
+                        <ClipboardList className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Clinical Tooling</h4>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Private notes, treatment plans, between-session homework, secure messaging, and one-click crisis escalation.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-6 group">
+                      <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
+                        <BadgeCheck className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">License Verified</h4>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Every clinician is reviewed by our team before portal access is granted. Trust, verified.</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="patient-info"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.35 }}
+                >
+                  <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-card border border-primary/20 text-primary text-[10px] font-black uppercase tracking-[0.2em] mb-10 shadow-xl shadow-primary/10">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
+                    </span>
+                    Presence Indicated
+                  </div>
+
+                  <h2 className="text-5xl md:text-7xl font-black text-foreground leading-[1.05] mb-10 tracking-tighter">
+                    Your path to <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">emotional clarity</span> <br />
+                    starts here.
+                  </h2>
+
+                  <div className="space-y-8">
+                    <div className="flex items-start gap-6 group">
+                      <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
+                        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                      </div>
+                      <div>
+                        <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Private Sanctuary</h4>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Military-grade encryption ensures your thoughts and sessions are kept completely confidential.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-6 group">
+                      <div className="w-14 h-14 shrink-0 rounded-[1.5rem] bg-card flex items-center justify-center text-primary shadow-xl border border-border group-hover:scale-110 transition-transform">
+                        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                      </div>
+                      <div>
+                        <h4 className="font-black text-foreground uppercase text-xs tracking-widest mb-2">Resonant AI</h4>
+                        <p className="text-muted-foreground text-sm font-medium leading-relaxed max-w-sm">Built on validated psychological models to provide genuine, compassionate emotional support.</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
 
           {/* Login Card Section */}
@@ -101,7 +169,7 @@ const Auth: React.FC = () => {
             transition={{ delay: 0.4 }}
             className="flex-1 w-full max-w-lg"
           >
-            <LoginCard />
+            <LoginCard initialRole={initialRole} onRoleChange={setRole} />
           </motion.div>
         </div>
       </main>

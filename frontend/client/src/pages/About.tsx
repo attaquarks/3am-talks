@@ -134,62 +134,17 @@ export default function About() {
               Start Your Journey
               <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Button>
-            <Dialog open={isLearnMoreOpen} onOpenChange={setIsLearnMoreOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="lg" className="h-14 px-8 rounded-2xl bg-white/50 backdrop-blur-md border-slate-200">
-                  Meet the Developer
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl bg-white/95 dark:bg-[#0f1117]/95 backdrop-blur-2xl border-white/20 shadow-2xl rounded-[32px]">
-                <div className="p-4">
-                  <div className="flex flex-col items-center text-center space-y-6">
-                    <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-primary to-secondary p-[2px]">
-                      <div className="w-full h-full rounded-[22px] bg-white dark:bg-[#0a0d14] flex items-center justify-center text-4xl">
-                        👨‍💻
-                      </div>
-                    </div>
-                    <div>
-                      <h2 className="text-3xl font-bold mb-1">Abdullah Mansoor</h2>
-                      <p className="text-primary font-medium tracking-wide">SOFTWARE ARCHITECT & AI RESEARCHER</p>
-                    </div>
-                    <Separator className="w-24 bg-primary/20" />
-                    <p className="text-slate-600 dark:text-slate-400 leading-relaxed italic">
-                      "I believe technology should serve our humanity, not replace it. ELLA is my contribution to making
-                      the world a slightly more empathetic place, one conversation at a time."
-                    </p>
-                    <div className="grid grid-cols-2 gap-4 w-full">
-                      <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl border border-slate-100 dark:border-white/10 text-left">
-                        <Code2 className="w-5 h-5 text-primary mb-2" />
-                        <p className="text-xs font-bold uppercase text-slate-400 mb-1">Background</p>
-                        <p className="text-sm font-medium">Computer Science at GIKI</p>
-                      </div>
-                      <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl border border-slate-100 dark:border-white/10 text-left">
-                        <Zap className="w-5 h-5 text-secondary mb-2" />
-                        <p className="text-xs font-bold uppercase text-slate-400 mb-1">Focus</p>
-                        <p className="text-sm font-medium">Full Stack & AI Systems</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-4 w-full pt-4">
-                      <Button
-                        variant="outline"
-                        className="flex-1 h-12 rounded-xl group"
-                        onClick={() => window.open('https://github.com/NOOBBoy35', '_blank')}
-                      >
-                        <Github className="w-4 h-4 mr-2" />
-                        Explore GitHub
-                      </Button>
-                      <Button
-                        className="flex-1 h-12 rounded-xl bg-[#0077b5] hover:bg-[#0077b5]/90 text-white border-0"
-                        onClick={() => window.open('https://www.linkedin.com/in/abdullah-mansoor-a9a424218/', '_blank')}
-                      >
-                        <Linkedin className="w-4 h-4 mr-2" />
-                        LinkedIn
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => {
+                const el = document.getElementById('meet-developers');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="h-14 px-8 rounded-2xl bg-white/50 backdrop-blur-md border-slate-200"
+            >
+              Meet the Developers
+            </Button>
           </motion.div>
         </motion.div>
 
@@ -268,6 +223,111 @@ export default function About() {
                   <div className="text-4xl font-bold text-white mb-2">{stat.val}</div>
                   <div className="text-slate-400 font-medium uppercase tracking-[0.2em] text-xs leading-relaxed">{stat.label}</div>
                 </div>
+              </FadeInWhenVisible>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Meet the Developers */}
+      <section id="meet-developers" className="py-32 relative">
+        <div className="container mx-auto px-4 max-w-6xl">
+          <FadeInWhenVisible>
+            <div className="text-center mb-16">
+              <Badge variant="outline" className="mb-4 text-primary border-primary/20">MEET THE TEAM</Badge>
+              <h2 className="text-4xl md:text-5xl font-bold mb-4 text-slate-900 dark:text-white leading-tight">
+                The minds behind <span className="text-primary italic">ELLA</span>.
+              </h2>
+              <p className="text-lg text-slate-500 dark:text-slate-400 max-w-2xl mx-auto">
+                Three developers, one mission — making compassionate support accessible for everyone.
+              </p>
+            </div>
+          </FadeInWhenVisible>
+
+          <div className="grid md:grid-cols-3 gap-6 items-stretch">
+            {[
+              {
+                name: "AttaUrRehman",
+                role: "BACKEND & ML ENGINEER",
+                emoji: "🛠️",
+                quote: "Great engineering disappears. My job is to make sure ELLA just works — at 3 AM, at scale, every time someone needs her.",
+                background: "Computer Science at GIKI",
+                focus: "Backend & ML Pipelines",
+                github: "https://github.com/AttaUrRehman",
+                linkedin: "https://www.linkedin.com/in/attaurrehman/",
+              },
+              {
+                name: "Muhammad Abdullah Farid",
+                role: "PROJECT LEAD & FULL STACK ENGINEER",
+                emoji: "🧑‍💻",
+                quote: "We built ELLA for everyone who's ever wanted to talk at an hour when no one was awake. Empathy is the feature; the code is just the delivery.",
+                background: "Computer Science at GIKI",
+                focus: "Product, Full Stack & Clinical UX",
+                github: "https://github.com/MuhammadAbdullahFarid",
+                linkedin: "https://www.linkedin.com/in/muhammad-abdullah-farid/",
+                featured: true,
+              },
+              {
+                name: "Abdullah Mansoor",
+                role: "SOFTWARE ARCHITECT & AI RESEARCHER",
+                emoji: "👨‍💻",
+                quote: "I believe technology should serve our humanity, not replace it. ELLA is my contribution to making the world a slightly more empathetic place, one conversation at a time.",
+                background: "Computer Science at GIKI",
+                focus: "Full Stack & AI Systems",
+                github: "https://github.com/NOOBBoy35",
+                linkedin: "https://www.linkedin.com/in/abdullah-mansoor-a9a424218/",
+              },
+            ].map((dev, i) => (
+              <FadeInWhenVisible key={dev.name} delay={i * 0.1}>
+                <motion.div
+                  whileHover={{ y: -8 }}
+                  className={`h-full bg-white/95 dark:bg-[#0f1117]/95 backdrop-blur-2xl border rounded-[32px] p-8 shadow-2xl transition-all ${dev.featured ? 'border-primary/40 ring-2 ring-primary/20 md:scale-[1.03]' : 'border-white/20 dark:border-white/10'}`}
+                >
+                  <div className="flex flex-col items-center text-center space-y-6 h-full">
+                    <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-primary to-secondary p-[2px]">
+                      <div className="w-full h-full rounded-[22px] bg-white dark:bg-[#0a0d14] flex items-center justify-center text-4xl">
+                        {dev.emoji}
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold mb-1 text-slate-900 dark:text-white">{dev.name}</h3>
+                      <p className="text-primary font-medium tracking-wide text-sm">{dev.role}</p>
+                    </div>
+                    <Separator className="w-24 bg-primary/20" />
+                    <p className="text-slate-600 dark:text-slate-400 leading-relaxed italic text-sm flex-1">
+                      "{dev.quote}"
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 w-full">
+                      <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl border border-slate-100 dark:border-white/10 text-left">
+                        <Code2 className="w-5 h-5 text-primary mb-2" />
+                        <p className="text-xs font-bold uppercase text-slate-400 mb-1">Background</p>
+                        <p className="text-sm font-medium">{dev.background}</p>
+                      </div>
+                      <div className="bg-slate-50 dark:bg-white/5 p-4 rounded-2xl border border-slate-100 dark:border-white/10 text-left">
+                        <Zap className="w-5 h-5 text-secondary mb-2" />
+                        <p className="text-xs font-bold uppercase text-slate-400 mb-1">Focus</p>
+                        <p className="text-sm font-medium">{dev.focus}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 w-full pt-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 h-12 rounded-xl group"
+                        onClick={() => window.open(dev.github, '_blank')}
+                      >
+                        <Github className="w-4 h-4 mr-2" />
+                        GitHub
+                      </Button>
+                      <Button
+                        className="flex-1 h-12 rounded-xl bg-[#0077b5] hover:bg-[#0077b5]/90 text-white border-0"
+                        onClick={() => window.open(dev.linkedin, '_blank')}
+                      >
+                        <Linkedin className="w-4 h-4 mr-2" />
+                        LinkedIn
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
               </FadeInWhenVisible>
             ))}
           </div>

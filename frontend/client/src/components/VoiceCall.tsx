@@ -8,6 +8,7 @@ import {
   BarVisualizer,
   DisconnectButton,
 } from "@livekit/components-react";
+import { Track } from "livekit-client";
 import { Phone, PhoneOff, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,7 @@ function VoiceAssistantVisualizer() {
       ? {
           participant: localParticipant,
           publication: microphoneTrack,
-          source: "microphone" as const,
+          source: Track.Source.Microphone,
         }
       : undefined;
 
