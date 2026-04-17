@@ -27,6 +27,7 @@ export default function Profile() {
   const [profileData, setProfileData] = useState({
     name: "",
     email: "",
+    phone: "",
     joinDate: "",
     moodPreference: "neutral",
     emergencyContact: ""
@@ -73,6 +74,7 @@ export default function Profile() {
       setProfileData({
         name: profile.name,
         email: user?.email || "",
+        phone: profile.phone || "",
         joinDate: new Date(profile.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }),
         moodPreference: profile.mood_preference,
         emergencyContact: profile.emergency_contact || ""
@@ -90,10 +92,21 @@ export default function Profile() {
     setIsSaving(true);
     try {
       // Update profile data (name and mood preference)
+      const trimmedPhone = profileData.phone.trim();
+      if (trimmedPhone && !/^\+[1-9][0-9]{6,14}$/.test(trimmedPhone)) {
+        toast({
+          title: "Invalid phone",
+          description: "Use E.164 format, e.g. +923001234567",
+          variant: "destructive",
+        });
+        setIsSaving(false);
+        return;
+      }
       await updateProfile({
         name: profileData.name,
         mood_preference: profileData.moodPreference,
-        emergency_contact: profileData.emergencyContact
+        emergency_contact: profileData.emergencyContact,
+        phone: trimmedPhone,
       });
 
       // Email update requires dedicated backend auth endpoint (not implemented yet)
@@ -495,6 +508,19 @@ export default function Profile() {
                 </div>
 
                 <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Your Phone</label>
+                  <Input
+                    type="tel"
+                    placeholder="+923001234567"
+                    value={profileData.phone}
+                    onChange={(e) => setProfileData(prev => ({ ...prev, phone: e.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Used as your callback number in emergency safety alerts. E.164 format.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Emergency Contact</label>
                   <Input
                     type="tel"
@@ -503,7 +529,7 @@ export default function Profile() {
                     onChange={(e) => setProfileData(prev => ({ ...prev, emergencyContact: e.target.value }))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Contact number for emergency situations
+                    Legacy single contact. To configure WhatsApp alerts, use the Safety page.
                   </p>
                 </div>
 

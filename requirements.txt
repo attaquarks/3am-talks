@@ -18,6 +18,10 @@ itsdangerous
 # LiveKit Voice Agent
 livekit-agents[openai,silero,elevenlabs]~=1.3
 livekit-api
+edge-tts
+
+# Crisis Safety — Twilio WhatsApp/SMS for emergency contact alerts
+twilio>=9.0.0
 
 # Testing
 pytest

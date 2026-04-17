@@ -14,13 +14,55 @@ export function AuthWrapper({ children }: AuthWrapperProps) {
   useEffect(() => {
     if (loading) return;
 
-    const publicPaths = ['/', '/auth', '/learn-more', '/auth/oauth-success'];
+    const publicPaths = ['/', '/auth', '/auth/therapist', '/learn-more', '/auth/oauth-success', '/invite/accept', '/about'];
     const isPublicPath = publicPaths.includes(location.pathname);
+    const role = user?.role ?? 'patient';
+    const status = user?.account_status ?? 'active';
 
     if (!user && !isPublicPath) {
       navigate('/auth');
-    } else if (user && (location.pathname === '/' || location.pathname === '/auth')) {
-      navigate('/dashboard');
+      return;
+    }
+
+    if (!user) return;
+
+    // Therapists awaiting verification — allow only pending page + profile + auth.
+    if (role === 'therapist' && status === 'pending_verification') {
+      const allowed = ['/therapist-portal/pending', '/therapist-portal/profile', '/auth', '/'];
+      if (!allowed.includes(location.pathname)) {
+        navigate('/therapist-portal/pending');
+      }
+      return;
+    }
+
+    if (status !== 'active') {
+      navigate('/auth');
+      return;
+    }
+
+    if (location.pathname === '/' || location.pathname === '/auth' || location.pathname === '/auth/therapist') {
+      if (role === 'admin') navigate('/admin');
+      else if (role === 'therapist') navigate('/therapist-portal');
+      else navigate('/dashboard');
+      return;
+    }
+
+    if (location.pathname.startsWith('/admin') && role !== 'admin') {
+      navigate(role === 'therapist' ? '/therapist-portal' : '/dashboard');
+      return;
+    }
+
+    if (location.pathname.startsWith('/therapist-portal') && role !== 'therapist') {
+      navigate(role === 'admin' ? '/admin' : '/dashboard');
+      return;
+    }
+
+    const patientOnlyPaths = ['/dashboard', '/chat', '/therapist', '/history', '/profile', '/my-therapists'];
+    if (role === 'admin' && patientOnlyPaths.includes(location.pathname)) {
+      navigate('/admin');
+    }
+    if (role === 'therapist' && patientOnlyPaths.includes(location.pathname)) {
+      navigate('/therapist-portal');
     }
   }, [user, loading, navigate, location.pathname]);
 

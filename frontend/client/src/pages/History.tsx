@@ -5,10 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from '@/components/auth/BackgroundDecor';
-import { Search, Filter, Calendar, MessageCircle, Smile, Meh, Frown } from "lucide-react";
+import { Search, Filter, Calendar, MessageCircle, Smile, Meh, Frown, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConversations } from "@/hooks/useConversations";
 import { useUserStats } from "@/hooks/useUserStats";
+import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 // import { supabase } from "@/integrations/supabase/client"; // Removed
 
@@ -27,8 +28,9 @@ export default function History() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
   const [selectedConversation, setSelectedConversation] = useState<any>(null);
-  const { conversations, loading: conversationsLoading } = useConversations();
+  const { conversations, loading: conversationsLoading, refetch: refreshConversations } = useConversations();
   const { stats, loading: statsLoading } = useUserStats();
+  const { toast } = useToast();
   const [conversationDetails, setConversationDetails] = useState<Record<string, any>>({});
 
   // Generate real summaries and format durations
@@ -115,7 +117,7 @@ export default function History() {
   // Convert conversations to match the expected format with real data
   const conversationHistory = conversations.map(conv => {
     const messages = conversationDetails[conv.id] || [];
-    const realSummary = generateRealSummary(conv, messages);
+    const summary = conv.title || generateRealSummary(conv, messages);
     const timeAgo = formatTimeAgo(new Date(conv.created_at));
     const duration = formatDuration(conv.duration_minutes || 0);
 
@@ -125,7 +127,7 @@ export default function History() {
       duration: duration,
       timeAgo: timeAgo,
       mood: conv.mood as "happy" | "neutral" | "sad" | null,
-      summary: realSummary,
+      summary: summary,
       tags: conv.tags || [],
       messages: messages
     };
@@ -173,6 +175,17 @@ export default function History() {
     navigate('/therapist', { state: { conversationId } });
   };
 
+  const handleDeleteConversation = async (conversationId: string) => {
+    try {
+      const res = await fetch(`/api/data/conversations/${conversationId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      refreshConversations();
+      toast({ title: "Deleted", description: "Conversation removed." });
+    } catch {
+      toast({ title: "Error", description: "Failed to delete.", variant: "destructive" });
+    }
+  };
+
   const getMoodStats = (conversations: any[]) => {
     const moodCounts = { happy: 0, neutral: 0, sad: 0 };
     conversations.forEach(conv => {
@@ -184,11 +197,11 @@ export default function History() {
   };
 
   return (
-    <div className="min-h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-x-hidden">
+    <div className="h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-hidden">
       <BackgroundDecor />
       <Navigation />
 
-      <main className="container mx-auto px-4 py-8 pb-20 md:pb-8">
+      <main className="flex-1 min-h-0 overflow-y-auto container mx-auto px-4 py-4 pb-20 md:pb-4">
         {/* Header */}
         <div className="mb-8 animate-fade-in-up">
           <h1 className="text-3xl font-bold text-foreground mb-2">
@@ -443,6 +456,14 @@ export default function History() {
                         onClick={() => handleContinueConversation(conversation.id)}
                       >
                         Continue
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeleteConversation(conversation.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>

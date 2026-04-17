@@ -1,0 +1,69 @@
+{
+  "PK": {
+    "country": "Pakistan",
+    "emergency": "1122",
+    "helplines": [
+      {
+        "name": "Umang Helpline",
+        "phone": "+923117786264",
+        "hours": "24/7",
+        "type": "mental_health",
+        "languages": ["English", "Urdu"]
+      },
+      {
+        "name": "Rozan Counseling",
+        "phone": "+923041111741",
+        "hours": "9AM-5PM",
+        "type": "counseling",
+        "languages": ["English", "Urdu"]
+      },
+      {
+        "name": "Taskeen",
+        "phone": "+923028444357",
+        "hours": "Various",
+        "type": "mental_health",
+        "languages": ["English", "Urdu"]
+      }
+    ]
+  },
+  "US": {
+    "country": "United States",
+    "emergency": "911",
+    "helplines": [
+      {
+        "name": "988 Suicide & Crisis Lifeline",
+        "phone": "988",
+        "hours": "24/7",
+        "type": "suicide_prevention",
+        "languages": ["English", "Spanish"]
+      },
+      {
+        "name": "Crisis Text Line",
+        "phone": "Text HOME to 741741",
+        "hours": "24/7",
+        "type": "crisis_text",
+        "languages": ["English"]
+      }
+    ]
+  },
+  "GB": {
+    "country": "United Kingdom",
+    "emergency": "999",
+    "helplines": [
+      {
+        "name": "Samaritans",
+        "phone": "116123",
+        "hours": "24/7",
+        "type": "crisis_support",
+        "languages": ["English"]
+      },
+      {
+        "name": "Shout",
+        "phone": "Text SHOUT to 85258",
+        "hours": "24/7",
+        "type": "crisis_text",
+        "languages": ["English"]
+      }
+    ]
+  }
+}

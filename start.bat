@@ -13,13 +13,13 @@ echo ================================================
 echo [1/3] Starting backend API on http://localhost:5050 (using .venv) ...
 REM Use -m uvicorn so the app loads once as src.api (avoids odd reload/double-import with python src\api.py)
 REM Close the old "3AM-Backend" window before re-running start.bat, or you keep a stale API (wrong routes / HTTP 404).
-start "3AM-Backend" cmd /c "cd /d %~dp0 && %~dp0.venv\Scripts\python.exe -m uvicorn src.api:app --host 0.0.0.0 --port 5050 --reload"
+start "3AM-Backend" cmd /k "cd /d "%~dp0" && ".venv\Scripts\python.exe" -m uvicorn src.api:app --host 0.0.0.0 --port 5050 --reload"
 
 echo [2/3] Starting frontend on http://localhost:5173 ...
-start "3AM-Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"
+start "3AM-Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
 echo [3/3] Starting Voice Agent (Ella) ...
-start "3AM-VoiceAgent" cmd /c "cd /d %~dp0 && %~dp0.venv\Scripts\python.exe src\voice_agent.py dev"
+start "3AM-VoiceAgent" cmd /k "cd /d "%~dp0" && ".venv\Scripts\python.exe" src\voice_agent.py dev"
 
 echo.
 echo ================================================
