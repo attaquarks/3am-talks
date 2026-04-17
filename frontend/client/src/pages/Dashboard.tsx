@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from '@/components/auth/BackgroundDecor';
-import { MessageCircle, BookOpen, TrendingUp, Calendar as CalendarIcon, Smile, Meh, Frown } from "lucide-react";
+import PersonalityTraits from '@/components/PersonalityTraits';
+import { MessageCircle, BookOpen, TrendingUp, Calendar as CalendarIcon, Smile, Meh, Frown, Brain } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useProfile } from "@/hooks/useProfile";
 import { useMoodEntries } from "@/hooks/useMoodEntries";
@@ -398,50 +399,48 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Daily Check-in */}
+          {/* Personality Traits */}
           <Card className="animate-fade-in-up delay-300">
             <CardHeader>
-              <CardTitle>Today's Check-in</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-primary" />
+                <span>Your Personality Profile</span>
+              </CardTitle>
               <CardDescription>
-                How are you feeling right now?
+                Big Five personality traits based on your conversations with ELLA
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="text-center py-8">
-                  <div className="w-20 h-20 bg-gradient-hero rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-soft">
-                    <MessageCircle className="h-8 w-8 text-primary" />
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Haven't checked in today yet
-                  </p>
-                  <Button variant="hero" size="lg" className="w-full" onClick={() => setShowCheckinModal(true)}>
-                    Quick Check-in
-                  </Button>
-                </div>
+              <PersonalityTraits profile={profile} loading={profileLoading} />
+            </CardContent>
+          </Card>
+        </div>
 
-                <div className="border-t border-border pt-4">
-                  <h4 className="font-medium text-foreground mb-2">Recent Activity</h4>
-                  <div className="space-y-2">
-                    {statsLoading ? (
-                      <p className="text-sm text-muted-foreground">Loading stats...</p>
-                    ) : stats ? (
-                      <>
-                        <p className="text-sm text-muted-foreground">
-                          🌟 {stats.current_streak} days conversation streak
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          📊 Mood improved {stats.mood_improvement_percentage}% this week
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          💝 Total sessions: {stats.total_sessions}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No activity data yet</p>
-                    )}
-                  </div>
-                </div>
+        {/* Stats Row */}
+        <div className="mt-6">
+          <Card className="animate-fade-in-up delay-400">
+            <CardContent className="p-4">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                {statsLoading ? (
+                  <p className="text-sm text-muted-foreground col-span-3">Loading stats...</p>
+                ) : stats ? (
+                  <>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">🌟 {stats.current_streak}</div>
+                      <div className="text-xs text-muted-foreground">Day Streak</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">📊 {stats.mood_improvement_percentage}%</div>
+                      <div className="text-xs text-muted-foreground">Mood Improvement</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">💝 {stats.total_sessions}</div>
+                      <div className="text-xs text-muted-foreground">Total Sessions</div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground col-span-3">No activity data yet</p>
+                )}
               </div>
             </CardContent>
           </Card>

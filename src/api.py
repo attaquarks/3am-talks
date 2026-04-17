@@ -104,6 +104,13 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     conversation_history: Optional[List[dict]] = None
+    is_questionnaire_response: Optional[bool] = False
+
+
+class QuestionnaireAnswerRequest(BaseModel):
+    question_id: int
+    response: str
+    conversation_id: Optional[str] = None
 
 
 class VoiceChatRequest(BaseModel):
@@ -517,26 +524,25 @@ async def agent_log_unmatched_api(request: Request, call_next):
 
 @app.post("/api/register")
 def register(body: RegisterRequest, response: Response):
-    """Register a new user via Supabase Auth, create persistent profile/stats, start session."""
+    """Register a new user via Supabase Auth, create persistent profile and stats."""
     try:
         mgr = get_manager()
         result = mgr.register_user(body.email, body.password)
         user_id = result["user_id"]
-        
-        # Update profile with name (using raw update to profile table)
+
+        # Update profile with display name
         try:
-             mgr.db_client.update(
+            mgr.db_client.update(
                 "user_profiles",
                 {"name": body.name},
                 {"user_id": f"eq.{user_id}"}
             )
         except Exception as e:
-            logger.warning(f"Could not sets name on profile: {e}")
+            logger.warning(f"Could not set name on profile: {e}")
 
-        # Ensure persistent stats exist
+        # Ensure persistent stats row exists
         _get_stats_persistent(user_id)
 
-        # Build user object matching frontend User interface
         user_data = {
             "id": user_id,
             "username": body.name,
@@ -544,6 +550,7 @@ def register(body: RegisterRequest, response: Response):
             "createdAt": datetime.utcnow().isoformat(),
         }
 
+        logger.info(f"[register] New user registered: {user_id}")
         create_session(user_data, response)
         return user_data
 
@@ -552,6 +559,7 @@ def register(body: RegisterRequest, response: Response):
     except Exception as e:
         logger.error(f"Registration failed: {e}")
         raise HTTPException(status_code=400, detail={"message": str(e)})
+
 
 
 @app.post("/api/login")
@@ -896,6 +904,132 @@ def delete_account(request: Request, response: Response):
 # ===================================================================
 
 
+@app.post("/api/session/start")
+def start_session(request: Request):
+    """Start a new conversation session for the authenticated user."""
+    user = require_user(request)
+    user_id = str(user["id"])
+
+    try:
+        mgr = get_manager()
+        session_result = mgr.start_session(user_id)
+        return {"conversation_id": session_result["conversation_id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session start failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/questionnaire/start")
+def start_questionnaire(request: Request):
+    """
+    Initialize the personality questionnaire for the current user.
+    Called by the /questionnaire page on mount.
+    Returns the first question.
+    """
+    user = require_user(request)
+    user_id = str(user["id"])
+
+    try:
+        mgr = get_manager()
+        profile = mgr.user_service.get_user_profile(user_id)
+
+        if profile and profile.get("questionnaire_completed", False):
+            return {"completed": True, "question": None}
+
+        # Initialize (or re-initialize) questionnaire in memory
+        from questionnaire import PersonalityQuestionnaire
+        mgr.questionnaires[user_id] = PersonalityQuestionnaire()
+        first_question = mgr.questionnaires[user_id].get_next_question()
+        total = len(PersonalityQuestionnaire.QUESTIONS)
+
+        logger.info(f"[questionnaire/start] Initialized for user {user_id}, q_id={first_question.get('id') if first_question else None}")
+
+        return {
+            "completed": False,
+            "question": first_question,
+            "progress": {"answered": 0, "total": total},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[questionnaire/start] Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/questionnaire/answer")
+def answer_questionnaire(body: QuestionnaireAnswerRequest, request: Request):
+    """
+    Submit an answer to the personality questionnaire.
+    Returns the next question or marks questionnaire as complete.
+    """
+    user = require_user(request)
+    user_id = str(user["id"])
+
+    try:
+        mgr = get_manager()
+
+        # Get or create conversation if not provided
+        conv_id = body.conversation_id
+        if not conv_id:
+            session_result = mgr.start_session(user_id)
+            conv_id = session_result["conversation_id"]
+
+        # Process the questionnaire answer
+        result = mgr.process_message(
+            user_id=user_id,
+            conversation_id=conv_id,
+            user_message=body.response,
+            is_questionnaire_response=True,
+        )
+
+        response = {
+            "conversation_id": conv_id,
+            "response": result.get("response", ""),
+        }
+
+        # Include next question if questionnaire is still active
+        if result.get("questionnaire"):
+            q = result["questionnaire"]
+            if q.get("completed"):
+                response["questionnaire"] = {"completed": True}
+            else:
+                response["questionnaire"] = {
+                    "active": True,
+                    "question": q.get("question"),
+                    "progress": q.get("progress"),
+                }
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Questionnaire answer failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/questionnaire/skip")
+def skip_questionnaire(request: Request):
+    """
+    Skip the remaining questionnaire questions and proceed to regular conversation.
+    """
+    user = require_user(request)
+    user_id = str(user["id"])
+
+    try:
+        mgr = get_manager()
+        result = mgr.skip_questionnaire(user_id)
+        return {"message": result.get("message", "Questionnaire skipped.")}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Skip questionnaire failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/chat")
 def chat(body: ChatRequest, request: Request):
     """
@@ -911,7 +1045,7 @@ def chat(body: ChatRequest, request: Request):
         # If no conversation_id provided, start a new session
         conv_id = body.conversation_id
         if not conv_id:
-            session_result = mgr.start_session(user_id, start_questionnaire=False)
+            session_result = mgr.start_session(user_id)
             conv_id = session_result["conversation_id"]
 
         # Process the message through the full pipeline
@@ -919,10 +1053,10 @@ def chat(body: ChatRequest, request: Request):
             user_id=user_id,
             conversation_id=conv_id,
             user_message=body.message,
-            is_questionnaire_response=False,
+            is_questionnaire_response=body.is_questionnaire_response or False,
         )
 
-        return {
+        response = {
             "response": result.get("response", "I'm here to listen."),
             "content": result.get("response", "I'm here to listen."),
             "conversation_id": conv_id,
@@ -930,6 +1064,12 @@ def chat(body: ChatRequest, request: Request):
             "personality_scores": result.get("personality_scores"),
             "rag_techniques_used": result.get("rag_techniques_used", 0),
         }
+
+        # Include questionnaire completion info if just completed
+        if result.get("questionnaire"):
+            response["questionnaire"] = result["questionnaire"]
+
+        return response
 
     except HTTPException:
         raise
@@ -1092,7 +1232,7 @@ def create_table_record(table: str, request: Request, body: dict = {}):
 
     try:
         if table == "conversations":
-            session_result = mgr.start_session(user_id, start_questionnaire=False)
+            session_result = mgr.start_session(user_id)
             conv_id = session_result["conversation_id"]
             conv = mgr.user_service.get_conversation(conv_id) or {}
             frontend_conv = _backend_conversation_to_frontend(conv)

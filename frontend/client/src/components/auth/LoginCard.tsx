@@ -21,11 +21,7 @@ const LoginCard: React.FC = () => {
         const params = new URLSearchParams(window.location.search);
         const oauthError = params.get('oauth_error');
         if (oauthError) {
-            toast({
-                title: "Login failed",
-                description: oauthError,
-                variant: "destructive",
-            });
+            toast({ title: "Login failed", description: oauthError, variant: "destructive" });
             params.delete('oauth_error');
             const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
             window.history.replaceState({}, '', next);
@@ -53,47 +49,35 @@ const LoginCard: React.FC = () => {
                 throw new Error(errorData.message || 'Authentication failed');
             }
 
-            toast({
-                title: "Success",
-                description: mode === AuthMode.SIGNUP ? "Account created successfully!" : "Logged in successfully!",
-            });
-
             await refetchUser();
+            
+            if (mode === AuthMode.SIGNUP) {
+                toast({ title: "Welcome to 3AM!", description: "Account created successfully." });
+            } else {
+                toast({ title: "Welcome back!", description: "Logged in successfully." });
+            }
             navigate('/dashboard');
         } catch (error: any) {
-            toast({
-                title: "Error",
-                description: error.message,
-                variant: "destructive",
-            });
+            toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
             setIsLoading(false);
         }
     };
 
     const handleSocialLogin = async (provider: 'google' | 'facebook') => {
-        // #region agent log
-        fetch('http://127.0.0.1:7498/ingest/de8af993-af91-47ad-aef8-03b59e70199a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'a2dded'},body:JSON.stringify({sessionId:'a2dded',location:'LoginCard.tsx:handleSocialLogin',message:'oauth signInWithOAuth',data:{provider,origin:window.location.origin,flow:'pkce'},hypothesisId:'verify',runId:'post-fix',timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         try {
             const supabase = getSupabaseBrowser();
             const { error } = await supabase.auth.signInWithOAuth({
                 provider,
-                options: {
-                    redirectTo: `${window.location.origin}/auth/oauth-success`,
-                },
+                options: { redirectTo: `${window.location.origin}/auth/oauth-success` },
             });
             if (error) {
-                toast({
-                    title: 'Login failed',
-                    description: error.message,
-                    variant: 'destructive',
-                });
+                toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
             }
         } catch (e: any) {
             toast({
                 title: 'Login failed',
-                description: e?.message ?? 'OAuth is not configured (add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env).',
+                description: e?.message ?? 'OAuth is not configured.',
                 variant: 'destructive',
             });
         }
@@ -216,11 +200,7 @@ const LoginCard: React.FC = () => {
                         </div>
                     </div>
 
-                    <motion.div
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className="pt-4"
-                    >
+                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="pt-4">
                         <button
                             type="submit"
                             disabled={isLoading}

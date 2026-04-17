@@ -381,10 +381,26 @@ export default function Therapist() {
       await endSession();
     }
 
-    setCurrentConversationId(null);
-    setMessages([]);
-    setCurrentMood('neutral');
-    setShowSidebar(false);
+    try {
+      const response = await fetch('/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) throw new Error('Failed to start session');
+
+      const data = await response.json();
+      setCurrentConversationId(data.conversation_id);
+      setMessages([]);
+      setCurrentMood('neutral');
+      setShowSidebar(false);
+    } catch (error) {
+      console.error('Error starting new conversation:', error);
+      setCurrentConversationId(null);
+      setMessages([]);
+      setCurrentMood('neutral');
+      setShowSidebar(false);
+    }
   };
 
   const selectConversation = (conversation: Conversation) => {

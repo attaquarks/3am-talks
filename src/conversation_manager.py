@@ -117,66 +117,40 @@ class ConversationManager:
 
     # ==================== SESSION MANAGEMENT ====================
     
-    def start_session(self, user_id: str, start_questionnaire: bool = True) -> Dict[str, str]:
+    def start_session(self, user_id: str) -> Dict[str, str]:
         """
-        Start a new conversation session for a user
-        
+        Start a new conversation session for a user.
+
         Args:
             user_id: Required User ID (from auth)
-            start_questionnaire: Whether to start with personality questionnaire for new users
-        
+
         Returns:
-            dict with session info and optionally first questionnaire question
+            dict with conversation_id and session info
         """
         try:
             if not user_id:
-                 raise ValueError("User ID is required to start a session")
-            
-            # Verify profile exists
+                raise ValueError("User ID is required to start a session")
+
+            # Ensure profile exists (create if missing)
             profile = self.user_service.get_user_profile(user_id)
-            is_new_user = False
             if not profile:
-                logger.warning(f"Profile not found for {user_id}, attempting to create")
-                profile = self.user_service.create_user_profile(user_id)
-                is_new_user = True
-            elif profile.get("total_text_analyzed", 0) == 0:
-                # If profile exists but has no analysis history, treat as new user
-                is_new_user = True
-            
-            # Check if user needs questionnaire (new user with minimal text analyzed)
-            needs_questionnaire = (
-                start_questionnaire and 
-                is_new_user and 
-                profile.get("total_text_analyzed", 0) < 100
-            )
-            
+                logger.warning(f"Profile not found for {user_id}, creating one")
+                self.user_service.create_user_profile(user_id)
+
             # Create conversation
             conversation = self.user_service.create_conversation(user_id)
-            
-            result = {
+
+            logger.info(f"Started session for user {user_id}, conv={conversation['conversation_id']}")
+
+            return {
                 "user_id": user_id,
                 "conversation_id": conversation["conversation_id"],
                 "message": "Session started successfully",
-                "is_new_user": is_new_user
             }
-            
-            # If new user, start questionnaire
-            if needs_questionnaire:
-                # Create questionnaire for this user
-                self.questionnaires[user_id] = PersonalityQuestionnaire()
-                first_question = self.questionnaires[user_id].get_next_question()
-                result["questionnaire"] = {
-                    "active": True,
-                    "question": first_question
-                }
-            
-            logger.info(f"Started session for user {user_id}")
-            
-            return result
         except Exception as e:
             logger.error(f"Failed to start session: {e}")
             raise
-    
+
     def end_session(self, conversation_id: str) -> dict:
         """End a conversation session"""
         try:
@@ -291,14 +265,26 @@ class ConversationManager:
                 raise ValueError(f"User profile {user_id} not found")
             
             # Handle questionnaire responses
-            questionnaire_completed = False
             questionnaire = self.questionnaires.get(user_id)
             
             if is_questionnaire_response and questionnaire and not questionnaire.completed:
                 # Get current question
                 current_question = questionnaire.get_next_question()
                 if current_question:
-                    # Submit response
+                    # Save response to the database
+                    try:
+                        self.db_client.insert(
+                            "questionnaire_responses",
+                            {
+                                "user_id": user_id,
+                                "question": current_question["question"],
+                                "response": user_message
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save response to database: {e}")
+
+                    # Submit response to in-memory system
                     questionnaire.submit_response(
                         current_question["id"],
                         user_message
@@ -306,11 +292,11 @@ class ConversationManager:
                     
                     # If questionnaire is now complete, analyze personality
                     if questionnaire.completed:
-                        questionnaire_completed = True
                         # Get all responses text
                         questionnaire_text = questionnaire.get_all_responses_text()
-                        
+
                         # Analyze personality from questionnaire
+                        personality_scores = None
                         if self.enable_personality and self.personality_detector:
                             personality_scores = self.personality_detector.detect_personality(
                                 questionnaire_text
@@ -322,6 +308,33 @@ class ConversationManager:
                                 len(questionnaire_text)
                             )
                             logger.info(f"Initial personality assessed from questionnaire for user {user_id}")
+
+                        # Mark questionnaire as completed in database
+                        self.user_service.mark_questionnaire_completed(user_id, completed=True)
+
+                        return {
+                            "response": "Thank you for completing the initial assessment. I now have a better understanding of you, and we can continue our conversation.",
+                            "turn": current_turn,
+                            "questionnaire": {
+                                "completed": True,
+                                "message": "Thank you for completing the initial assessment. I now have a better understanding of you, and we can continue our conversation."
+                            },
+                            "personality_scores": personality_scores
+                        }
+
+                    # Questionnaire is not yet complete, return next question
+                    next_question = questionnaire.get_next_question()
+                    if next_question:
+                        return {
+                            "response": f"Thank you for sharing that. {next_question['question']}",
+                            "turn": current_turn,
+                            "questionnaire": {
+                                "active": True,
+                                "question": next_question,
+                                "progress": questionnaire.get_progress()
+                            },
+                            "personality_scores": None
+                        }
             
             # Step 2: Save user message
             self.user_service.add_message(
@@ -332,28 +345,12 @@ class ConversationManager:
                 turn_index=current_turn
             )
             
-            # Step 3: Update personality if needed (or get current if questionnaire just completed)
-            if not questionnaire_completed:
-                personality_scores = self._update_personality_if_needed(
-                    user_id,
-                    conversation_id,
-                    force_update=False
-                )
-            
-            # If questionnaire is active and not completed, return next question
-            if is_questionnaire_response and questionnaire and not questionnaire.completed:
-                next_question = questionnaire.get_next_question()
-                if next_question:
-                    return {
-                        "response": f"Thank you for sharing that. {next_question['question']}",
-                        "turn": current_turn,
-                        "questionnaire": {
-                            "active": True,
-                            "question": next_question,
-                            "progress": questionnaire.get_progress()
-                        },
-                        "personality_scores": personality_scores if questionnaire_completed else None
-                    }
+            # Step 3: Update personality if needed
+            personality_scores = self._update_personality_if_needed(
+                user_id,
+                conversation_id,
+                force_update=False
+            )
             
             # Step 4: Retrieve RAG techniques
             rag_context = None
@@ -448,14 +445,6 @@ class ConversationManager:
                     "rag_techniques": rag_techniques_metadata
                 }
             }
-            
-            # Add questionnaire completion message if just completed
-            if questionnaire_completed:
-                result["questionnaire"] = {
-                    "completed": True,
-                    "message": "Thank you for completing the initial assessment. I now have a better understanding of you, and we can continue our conversation."
-                }
-            
             return result
             
         except Exception as e:
@@ -495,43 +484,88 @@ class ConversationManager:
         user_profile: Dict
     ) -> str:
         """
-        Build dynamic context updates (Personality + RAG + Onboarding) 
+        Build dynamic context updates (Personality + RAG + Onboarding)
         to be appended to the LLM's base persona.
         """
         updates = []
-        
+
         # 1. Onboarding / New User Logic
         is_new_user = user_profile.get("total_text_analyzed", 0) < 100
-        
+
         if current_turn == 1 and is_new_user:
             updates.append(
-                "NOTICE: This is a NEW patient. Start by briefly introducing yourself as a supportive CBT therapist. "
-                "Then, politely ask a simple opening question to get to know them and their communication style. "
-                "Do not dive into deep therapy yet."
+                "CONTEXT: This is a new conversation. Introduce yourself warmly as Ella. "
+                "Be genuinely curious about them - ask what brings them here today or what's on their mind. "
+                "Start building a connection naturally, like meeting a new friend."
             )
         elif current_turn <= 5 and is_new_user:
              updates.append(
-                "NOTICE: You are still in the initial assessment phase. "
-                "Continue to ask open-ended questions to gather text for personality analysis. "
-                "Be warm and encouraging."
+                "CONTEXT: You're still getting to know this person. "
+                "Be curious and warm. Ask thoughtful follow-up questions. "
+                "Focus on understanding them, not analyzing them."
             )
 
         # 2. Personality Adaptation (only if we have valid scores and it's not the very first turn)
         if personality_scores and self.enable_personality and not (current_turn == 1 and is_new_user):
-            # Only use inference if we have enough data (handled by should_update logic, but beneficial to check here too)
-            # PsyCOTInference creates strings like "Use a warm tone..."
+            # Adapt conversation style based on personality traits
             try:
-                # We pass an empty string as base because we only want the instructions
-                personality_instructions = PsyCOTInference.create_personality_aware_system_prompt("", personality_scores)
-                updates.append(personality_instructions.strip())
+                personality_context = self._build_personality_context(personality_scores)
+                if personality_context:
+                    updates.append(personality_context)
             except Exception as e:
-                logger.warning(f"Failed to generate personality instructions: {e}")
-        
-        # 3. RAG Context
+                logger.warning(f"Failed to generate personality context: {e}")
+
+        # 3. RAG Context - Only include if genuinely relevant
         if rag_context:
-            updates.append(f"RELEVANT THERAPEUTIC TECHNIQUES:\n{rag_context}")
-        
+            updates.append(f"SOME RELEVANT IDEAS THAT MIGHT HELP (use naturally if appropriate):\n{rag_context}")
+
         return "\n\n".join(updates)
+
+    def _build_personality_context(self, scores: Dict[str, float]) -> str:
+        """
+        Build personality-aware context for natural conversation adaptation.
+        Uses Big Five traits to subtly adjust communication style.
+        """
+        adaptations = []
+
+        # Neuroticism - Adjust emotional sensitivity
+        neuroticism = scores.get("Neuroticism", 0.5)
+        if neuroticism > 0.6:
+            adaptations.append("They may be feeling emotionally sensitive - be especially gentle, patient, and reassuring")
+        elif neuroticism < 0.4:
+            adaptations.append("They tend to be emotionally steady - you can be more direct and matter-of-fact")
+
+        # Conscientiousness - Adjust structure preference
+        conscientiousness = scores.get("Conscientiousness", 0.5)
+        if conscientiousness > 0.6:
+            adaptations.append("They appreciate structure and organization - consider offering clear frameworks or steps when relevant")
+        elif conscientiousness < 0.4:
+            adaptations.append("They prefer flexibility - keep things open-ended and exploratory")
+
+        # Openness - Adjust comfort with new ideas
+        openness = scores.get("Openness", 0.5)
+        if openness > 0.6:
+            adaptations.append("They're open to new perspectives and ideas - feel free to offer fresh viewpoints")
+        elif openness < 0.4:
+            adaptations.append("They prefer familiar concepts - build on what they already know and are comfortable with")
+
+        # Extroversion - Adjust interaction style
+        extroversion = scores.get("Extroversion", 0.5)
+        if extroversion > 0.6:
+            adaptations.append("They enjoy interactive conversation - engage actively and ask questions")
+        elif extroversion < 0.4:
+            adaptations.append("They appreciate space for reflection - don't feel the need to fill every silence")
+
+        # Agreeableness - Adjust warmth level
+        agreeableness = scores.get("Agreeableness", 0.5)
+        if agreeableness > 0.6:
+            adaptations.append("They respond well to warmth and collaboration - be especially supportive")
+        elif agreeableness < 0.4:
+            adaptations.append("They appreciate directness - be straightforward and honest")
+
+        if adaptations:
+            return "PERSONALITY CONTEXT (adapt your style naturally):\n" + "\n".join(f"- {a}" for a in adaptations)
+        return ""
     
     def _generate_llm_response(
         self,
@@ -576,10 +610,19 @@ class ConversationManager:
         questionnaire = self.questionnaires.get(user_id)
         if questionnaire:
             skipped = questionnaire.skip_remaining()
+
+            # Mark questionnaire as completed (skipped) in database
+            self.user_service.mark_questionnaire_completed(user_id, completed=True)
+
             return {
                 "skipped": skipped,
                 "message": "Questionnaire skipped. You can proceed with regular conversation."
             }
+
+        # Even if no active questionnaire, mark as completed in database
+        # (handles case where frontend skipped after session start)
+        self.user_service.mark_questionnaire_completed(user_id, completed=True)
+
         return {
             "skipped": 0,
             "message": "No active questionnaire found."

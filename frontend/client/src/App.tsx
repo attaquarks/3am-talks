@@ -15,6 +15,7 @@ import About from "./pages/About";
 import LearnMore from "./pages/LearnMore";
 import NotFound from "./pages/NotFound";
 import OAuthSuccess from "./pages/OAuthSuccess";
+import Questionnaire from "./pages/Questionnaire";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/questionnaire" element={<Questionnaire />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/therapist" element={<Therapist />} />
                 <Route path="/history" element={<History />} />
