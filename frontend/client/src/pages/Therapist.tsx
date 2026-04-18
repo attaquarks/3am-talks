@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 // import { supabase } from '@/integrations/supabase/client'; // Removed
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ export default function Therapist() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const messagesAbortRef = useRef<AbortController | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentMood, setCurrentMood] = useState<'happy' | 'neutral' | 'sad'>('neutral');
@@ -128,17 +129,31 @@ export default function Therapist() {
     }
   };
 
-  const loadMessages = async (conversationId: string) => {
+  const loadMessages = useCallback(async (conversationId: string) => {
+    // Cancel any in-flight message fetch to prevent stale data from overwriting
+    if (messagesAbortRef.current) {
+      messagesAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    messagesAbortRef.current = controller;
+
     try {
-      const response = await fetch(`/api/data/messages?conversation_id=eq.${conversationId}&order=created_at.asc`);
+      const response = await fetch(
+        `/api/data/messages?conversation_id=eq.${conversationId}&order=created_at.asc`,
+        { signal: controller.signal }
+      );
 
       if (!response.ok) {
         throw new Error('Failed to load messages');
       }
 
       const data = await response.json();
-      setMessages(data || []);
-    } catch (error) {
+      // Only update state if this request wasn't aborted
+      if (!controller.signal.aborted) {
+        setMessages(data || []);
+      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return; // Expected when switching conversations
       console.error('Error loading messages:', error);
       toast({
         title: "Error",
@@ -146,7 +161,7 @@ export default function Therapist() {
         variant: "destructive"
       });
     }
-  };
+  }, [toast]);
 
   const detectMoodFromText = (text: string): 'happy' | 'neutral' | 'sad' => {
     const lowerText = text.toLowerCase();

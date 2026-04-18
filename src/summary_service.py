@@ -104,6 +104,17 @@ def _colab_url() -> Optional[str]:
     return os.getenv("COLAB_API_URL")
 
 
+# Module-level HTTP client with connection pooling (reused across calls)
+_llm_client: Optional[httpx.Client] = None
+
+
+def _get_llm_client() -> httpx.Client:
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = httpx.Client(timeout=60.0)
+    return _llm_client
+
+
 def _call_llm(system_prompt: str, user_prompt: str, *, max_tokens: int = 700, temperature: float = 0.2) -> str:
     url = _colab_url()
     if not url:
@@ -123,10 +134,10 @@ def _call_llm(system_prompt: str, user_prompt: str, *, max_tokens: int = 700, te
         "Content-Type": "application/json",
         "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
     }
-    with httpx.Client(timeout=90.0) as client:
-        resp = client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-        body = resp.json()
+    client = _get_llm_client()
+    resp = client.post(url, json=payload, headers=headers)
+    resp.raise_for_status()
+    body = resp.json()
     return body.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
 
 

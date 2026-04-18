@@ -378,7 +378,35 @@ def fire_alerts(
     location: Optional[Dict[str, Any]] = None,
     is_test: bool = False,
 ) -> Dict[str, Any]:
-    """Fetch contacts, dispatch WhatsApp (falling back to SMS), update the event."""
+    """Fetch contacts, dispatch WhatsApp (falling back to SMS), update the event.
+
+    Re-verifies consent before sending — the user may have revoked permission
+    during the countdown window between detection and dispatch.
+    """
+    # --- Re-check consent before dispatching (SEC-006) ---
+    if not is_test:
+        try:
+            settings = sb.select(
+                "crisis_safety_settings",
+                columns="emergency_alerts_enabled",
+                filters={"user_id": f"eq.{user_id}"},
+            )
+            if not settings or not settings[0].get("emergency_alerts_enabled"):
+                logger.info(
+                    f"fire_alerts: consent revoked for user {user_id} during countdown — aborting"
+                )
+                _update_event(
+                    sb,
+                    event_id,
+                    {
+                        "intervention_type": "consent_revoked_during_countdown",
+                        "emergency_alerts_sent": False,
+                    },
+                )
+                return {"contacts_notified": 0, "results": [], "reason": "consent_revoked"}
+        except Exception as exc:
+            logger.warning(f"fire_alerts: consent re-check failed: {exc} — proceeding cautiously")
+
     contacts = sb.select(
         "emergency_contacts",
         columns="id,contact_name,contact_phone,notification_channel,relationship",
