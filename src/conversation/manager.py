@@ -10,7 +10,7 @@ from database import SupabaseClient, UserService
 from ai_layer.personality_service import PersonalityService, PsyCOTInference
 from ai_layer.llm_service import LLMService
 from rag_layer import RAGService
-from questionnaire import PersonalityQuestionnaire
+from conversation.questionnaire import PersonalityQuestionnaire
 
 logger = logging.getLogger(__name__)
 class ConversationManager:

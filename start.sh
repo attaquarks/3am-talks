@@ -17,7 +17,7 @@ echo "================================================"
 # Start backend API
 echo "[1/2] Starting backend API on http://localhost:5050 ..."
 cd "$ROOT_DIR/src"
-python api.py &
+python main.py &
 BACKEND_PID=$!
 echo "       Backend PID: $BACKEND_PID"
 

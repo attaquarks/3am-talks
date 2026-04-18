@@ -17,7 +17,7 @@ from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, 
 from livekit.agents.llm import ChatChunk, FunctionTool, ChatContext
 from livekit.agents import ModelSettings
 from livekit.plugins import openai, elevenlabs, silero
-from edge_tts_plugin import TTS as EdgeTTS
+from voice.tts_plugin import TTS as EdgeTTS
 import httpx
 
 load_dotenv()
