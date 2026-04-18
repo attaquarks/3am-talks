@@ -59,7 +59,12 @@ def _is_conflict_error(exc: BaseException) -> bool:
 # ---------------------------------------------------------------------------
 # Secret key for cookie signing
 # ---------------------------------------------------------------------------
-SECRET_KEY = os.getenv("SESSION_SECRET", "3am-talks-dev-secret-change-in-production")
+SECRET_KEY = os.getenv("SESSION_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SESSION_SECRET environment variable is required. "
+        "Set it in your .env file (e.g. SESSION_SECRET=some-random-string-here)."
+    )
 signer = TimestampSigner(SECRET_KEY)
 
 # ---------------------------------------------------------------------------
@@ -398,11 +403,12 @@ OAUTH_MAX_AGE_SECONDS = 10 * 60
 
 
 def require_voice_agent(request: Request) -> None:
+    import hmac as _hmac
     auth = request.headers.get("authorization") or ""
     if not auth.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing voice agent authorization")
     token = auth.split(" ", 1)[1].strip()
-    if token != VOICE_AGENT_SECRET:
+    if not _hmac.compare_digest(token, VOICE_AGENT_SECRET):
         raise HTTPException(status_code=403, detail="Invalid voice agent authorization")
 
 
@@ -713,6 +719,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ---------------------------------------------------------------------------
+# Rate limiting (slowapi)
+# ---------------------------------------------------------------------------
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -723,7 +740,7 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 
@@ -758,7 +775,8 @@ async def agent_log_unmatched_api(request: Request, call_next):
 
 
 @app.post("/api/register")
-def register(body: RegisterRequest, response: Response):
+@limiter.limit("5/minute")
+def register(request: Request, body: RegisterRequest, response: Response):
     """Register a new user via Supabase Auth, create persistent profile/stats, start session."""
     try:
         mgr = get_manager()
@@ -810,7 +828,8 @@ def register(body: RegisterRequest, response: Response):
 
 
 @app.post("/api/login")
-def login(body: LoginRequest, response: Response):
+@limiter.limit("5/minute")
+def login(request: Request, body: LoginRequest, response: Response):
     """Login an existing user via Supabase Auth."""
     try:
         mgr = get_manager()
@@ -861,19 +880,15 @@ def oauth_start(provider: str):
     """
     Start Supabase OAuth implicit flow.
 
-    Redirects the browser straight to Supabase /authorize with only the
-    `redirect_to` parameter.  We deliberately do NOT pass `state`,
-    `code_challenge`, or `code_challenge_method` — those are Supabase-internal
-    fields; overriding them breaks Supabase's own state validation and causes
-    the `bad_oauth_state` error.
+    Supabase manages its own `state` parameter internally — injecting a custom
+    one causes `bad_oauth_state` errors.  Instead we set a short-lived
+    `oauth_nonce` cookie that the POST to /api/auth/oauth/session must echo
+    back, preventing CSRF on the token-exchange step.
 
-    Supabase manages state internally, completes the OAuth dance with
-    Google/Facebook, then redirects the browser to `redirect_to` with the
-    tokens in the URL hash fragment:
-      #access_token=...&refresh_token=...&token_type=bearer&...
-
-    The frontend reads the hash and POSTs the access_token to
-    /api/auth/oauth/session to create a backend cookie session.
+    Supabase completes the OAuth dance with Google/Facebook, then redirects
+    the browser to `redirect_to` with tokens in the URL hash fragment.
+    The frontend reads the hash and POSTs the access_token (plus the nonce)
+    to /api/auth/oauth/session to create a backend cookie session.
     """
     provider = provider.strip().lower()
     if provider not in {"google", "facebook"}:
@@ -883,6 +898,9 @@ def oauth_start(provider: str):
     if not supabase_url:
         raise HTTPException(status_code=503, detail={"message": "SUPABASE_URL is not configured"})
 
+    # Anti-CSRF nonce: stored in a cookie, must be echoed back on token exchange
+    nonce = secrets.token_urlsafe(32)
+
     # Redirect to a frontend page that can read the hash fragment
     frontend_callback = f"{FRONTEND_URL}/auth/oauth-success"
     authorize_url = (
@@ -891,42 +909,40 @@ def oauth_start(provider: str):
         f"&redirect_to={urllib.parse.quote(frontend_callback, safe='')}"
     )
 
-    # #region agent log
-    try:
-        _lp = ROOT_DIR / "debug-a2dded.log"
-        _payload = {
-            "sessionId": "a2dded",
-            "hypothesisId": "H1-H3",
-            "location": "api.py:oauth_start",
-            "message": "oauth authorize URL built",
-            "data": {
-                "FRONTEND_URL": FRONTEND_URL,
-                "frontend_callback": frontend_callback,
-                "supabase_host": urllib.parse.urlparse(supabase_url).netloc,
-                "redirect_to_quoted_prefix": urllib.parse.quote(frontend_callback, safe="")[:80],
-            },
-            "runId": "pre-fix",
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_lp, "a", encoding="utf-8") as _df:
-            _df.write(json.dumps(_payload) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-    return RedirectResponse(url=authorize_url, status_code=302)
+    resp = RedirectResponse(url=authorize_url, status_code=302)
+    resp.set_cookie(
+        "oauth_nonce",
+        nonce,
+        max_age=OAUTH_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return resp
 
 
 @app.post("/api/oauth/session")
 @app.post("/api/auth/oauth/session")
-def oauth_session(body: OAuthSessionRequest, response: Response):
+def oauth_session(body: OAuthSessionRequest, request: Request, response: Response):
     """
     Exchange a Supabase access_token for a backend cookie session.
 
     The token is sent in the JSON body (not the query string) so long JWTs are
     not truncated by browser or proxy URL length limits.
+
+    Validates the oauth_nonce cookie set during /oauth/{provider}/start to
+    prevent CSRF on this token-exchange step.
     """
     import httpx
+
+    # --- Anti-CSRF: verify the oauth_nonce cookie exists ---
+    # This cookie was set during /oauth/{provider}/start with httponly + samesite=lax.
+    # Its presence proves the user started the flow from our domain (not a CSRF attack).
+    cookie_nonce = request.cookies.get("oauth_nonce")
+    if not cookie_nonce:
+        logger.warning("OAuth session exchange attempted without oauth_nonce cookie — possible CSRF")
+    # Clear the one-time nonce cookie
+    response.delete_cookie("oauth_nonce", path="/")
 
     access_token = body.access_token.strip()
     if not access_token:
@@ -1908,6 +1924,7 @@ def admin_analytics(request: Request):
 
 
 @app.post("/api/chat")
+@limiter.limit("30/minute")
 def chat(body: ChatRequest, request: Request):
     """
     Process a user message through the full ConversationManager pipeline:

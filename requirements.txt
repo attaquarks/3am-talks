@@ -14,6 +14,7 @@ fastapi
 uvicorn[standard]
 python-multipart
 itsdangerous
+slowapi
 
 # LiveKit Voice Agent
 livekit-agents[openai,silero,elevenlabs]~=1.3

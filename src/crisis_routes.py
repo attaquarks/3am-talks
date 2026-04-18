@@ -113,6 +113,7 @@ def register_crisis_routes(app: FastAPI, require_user_fn=None) -> None:
     else:
         from api import require_user  # type: ignore
 
+    from api import limiter  # type: ignore
     from database.supabase_client import SupabaseClient
     from emergency_alert import (
         cancel_active_countdown,
@@ -322,6 +323,7 @@ def register_crisis_routes(app: FastAPI, require_user_fn=None) -> None:
     # -----------------------------------------------------------------------
 
     @app.post("/api/v1/crisis/test-alert")
+    @limiter.limit("3/hour")
     def test_alert(request: Request):
         user = require_user(request)
         user_id = str(user["id"])

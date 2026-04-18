@@ -224,10 +224,13 @@ def register_therapist_routes(app: FastAPI) -> None:
         return link
 
     def _has_scope(link: dict, scope: str) -> bool:
-        consent = link.get("consent_scope") or {}
+        """Check whether a therapist-patient link grants a specific consent scope.
+        Fails closed: if consent_scope is missing, corrupt, or not a dict,
+        deny access rather than granting it."""
+        consent = link.get("consent_scope")
         if not isinstance(consent, dict):
-            return True
-        return bool(consent.get(scope, True))
+            return False  # fail closed — deny by default
+        return bool(consent.get(scope, False))
 
     def _log_access(therapist_id: str, patient_id: str, resource: str, action: str, resource_id: str = None) -> None:
         try:
@@ -427,7 +430,10 @@ def register_therapist_routes(app: FastAPI) -> None:
 
     @app.get("/api/therapist/patients")
     def therapist_patients(request: Request):
-        """List the therapist's active patients with at-a-glance stats."""
+        """List the therapist's active patients with at-a-glance stats.
+
+        Queries are scoped to linked patient IDs only — never loads full tables.
+        """
         user = _require_therapist(request)
         therapist_id = str(user["id"])
         links = _select_optional_table(
@@ -437,21 +443,24 @@ def register_therapist_routes(app: FastAPI) -> None:
         if not links:
             return {"patients": [], "total": 0}
 
-        profiles = _select_optional_table("user_profiles")
-        by_uid = {str(p.get("user_id")): p for p in profiles}
-        convs = _select_optional_table("conversations")
-        by_patient_convs: Dict[str, List[dict]] = {}
-        for c in convs:
-            by_patient_convs.setdefault(str(c.get("user_id") or ""), []).append(c)
-        mood_rows = _select_optional_table("mood_entries")
-        mood_by_patient: Dict[str, List[dict]] = {}
-        for m in mood_rows:
-            mood_by_patient.setdefault(str(m.get("user_id") or ""), []).append(m)
+        patient_ids = [str(lk.get("patient_id")) for lk in links]
 
-        crisis = _select_optional_table("crisis_events")
+        # Fetch data scoped to linked patients only (not entire tables)
+        by_uid: Dict[str, dict] = {}
+        by_patient_convs: Dict[str, List[dict]] = {}
+        mood_by_patient: Dict[str, List[dict]] = {}
         crisis_by_patient: Dict[str, List[dict]] = {}
-        for c in crisis:
-            crisis_by_patient.setdefault(str(c.get("patient_id") or ""), []).append(c)
+
+        for pid in patient_ids:
+            profs = _select_optional_table("user_profiles", filters={"user_id": f"eq.{pid}"})
+            if profs:
+                by_uid[pid] = profs[0]
+            for c in _select_optional_table("conversations", filters={"user_id": f"eq.{pid}"}):
+                by_patient_convs.setdefault(pid, []).append(c)
+            for m in _select_optional_table("mood_entries", filters={"user_id": f"eq.{pid}"}):
+                mood_by_patient.setdefault(pid, []).append(m)
+            for c in _select_optional_table("crisis_events", filters={"patient_id": f"eq.{pid}"}):
+                crisis_by_patient.setdefault(pid, []).append(c)
 
         patients = []
         for link in links:
@@ -768,8 +777,13 @@ def register_therapist_routes(app: FastAPI) -> None:
         if not existing:
             raise HTTPException(status_code=404, detail={"message": "Homework not found."})
         row = existing[0]
-        if viewer not in {str(row.get("therapist_id")), str(row.get("patient_id"))}:
+        hw_therapist = str(row.get("therapist_id") or "")
+        hw_patient = str(row.get("patient_id") or "")
+        if viewer not in {hw_therapist, hw_patient}:
             raise HTTPException(status_code=403, detail={"message": "Not authorized."})
+        # Verify the therapist-patient link is still active before allowing updates
+        if not _active_link(hw_therapist, hw_patient):
+            raise HTTPException(status_code=403, detail={"message": "Therapist-patient link is no longer active."})
 
         updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
         if body.due_at:
@@ -1214,9 +1228,14 @@ def register_therapist_routes(app: FastAPI) -> None:
             "patient_therapist_links",
             filters={"therapist_id": f"eq.{therapist_id}", "status": "eq.active"},
         )
-        patient_ids = {str(lk.get("patient_id")) for lk in links}
-        all_crisis = _select_optional_table("crisis_events")
-        mine = [c for c in all_crisis if str(c.get("patient_id")) in patient_ids]
+        patient_ids = [str(lk.get("patient_id")) for lk in links]
+        if not patient_ids:
+            return {"events": []}
+        # Fetch only crisis events for linked patients (not entire table)
+        mine: List[dict] = []
+        for pid in patient_ids:
+            rows = _select_optional_table("crisis_events", filters={"patient_id": f"eq.{pid}"})
+            mine.extend(rows)
         mine.sort(key=lambda c: str(c.get("created_at") or ""), reverse=True)
         return {"events": mine}
 
