@@ -14,7 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from crisis_service import detect_crisis, keyword_scan, RiskLevel  # noqa: E402
+from crisis.service import detect_crisis, keyword_scan, RiskLevel  # noqa: E402
 
 
 CRITICAL_MESSAGES = [
