@@ -45,3 +45,6 @@ cookies.txt
 node_modules/
 dist/
 *.log
+
+# Local audit artifacts (not reviewed into source)
+AUDIT REPORTS/
