@@ -17,6 +17,7 @@ import About from "./pages/About";
 import LearnMore from "./pages/LearnMore";
 import NotFound from "./pages/NotFound";
 import OAuthSuccess from "./pages/OAuthSuccess";
+import Questionnaire from "./pages/Questionnaire";
 import TherapistDashboard from "./pages/TherapistDashboard";
 import TherapistPending from "./pages/TherapistPending";
 import TherapistProfile from "./pages/TherapistProfile";
@@ -48,6 +49,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/questionnaire" element={<Questionnaire />} />
                 <Route path="/auth/therapist" element={<Auth />} />
                 <Route path="/auth/oauth-success" element={<OAuthSuccess />} />
 

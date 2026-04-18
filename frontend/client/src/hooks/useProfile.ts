@@ -11,6 +11,16 @@ interface Profile {
   deleted?: boolean;
   created_at: string;
   updated_at: string;
+  // Big Five personality traits (0.0 - 1.0)
+  extroversion: number;
+  neuroticism: number;
+  agreeableness: number;
+  conscientiousness: number;
+  openness: number;
+  total_text_analyzed: number;
+  personality_updated_at: string | null;
+  // Questionnaire status
+  questionnaire_completed: boolean;
 }
 
 export function useProfile() {

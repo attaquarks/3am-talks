@@ -24,18 +24,33 @@ class UserService:
             "conscientiousness": 0.5,
             "openness": 0.5,
             "total_text_analyzed": 0,
+            "questionnaire_completed": False,
             "profile_version": 1
         }
-        
+
         if user_id:
             data["user_id"] = user_id
-        
+
         try:
             profile = self.db.insert("user_profiles", data)
             logger.info(f"Created user profile: {profile.get('user_id')}")
             return profile
         except Exception as e:
             logger.error(f"Failed to create user profile: {e}")
+            raise
+
+    def mark_questionnaire_completed(self, user_id: str, completed: bool = True) -> dict:
+        """Mark the user's questionnaire as completed or skipped"""
+        try:
+            updated_profile = self.db.update(
+                "user_profiles",
+                {"questionnaire_completed": completed},
+                {"user_id": f"eq.{user_id}"}
+            )
+            logger.info(f"Marked questionnaire as {'completed' if completed else 'skipped'} for user {user_id}")
+            return updated_profile
+        except Exception as e:
+            logger.error(f"Failed to update questionnaire status: {e}")
             raise
     
     def get_user_profile(self, user_id: str) -> Optional[dict]:

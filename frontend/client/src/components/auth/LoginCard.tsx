@@ -38,11 +38,7 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
         const params = new URLSearchParams(window.location.search);
         const oauthError = params.get('oauth_error');
         if (oauthError) {
-            toast({
-                title: "Login failed",
-                description: oauthError,
-                variant: "destructive",
-            });
+            toast({ title: "Login failed", description: oauthError, variant: "destructive" });
             params.delete('oauth_error');
             const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
             window.history.replaceState({}, '', next);
@@ -121,11 +117,7 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
                 navigate('/dashboard');
             }
         } catch (error: any) {
-            toast({
-                title: "Error",
-                description: error.message,
-                variant: "destructive",
-            });
+            toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
             setIsLoading(false);
         }
@@ -136,21 +128,15 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
             const supabase = getSupabaseBrowser();
             const { error } = await supabase.auth.signInWithOAuth({
                 provider,
-                options: {
-                    redirectTo: `${window.location.origin}/auth/oauth-success`,
-                },
+                options: { redirectTo: `${window.location.origin}/auth/oauth-success` },
             });
             if (error) {
-                toast({
-                    title: 'Login failed',
-                    description: error.message,
-                    variant: 'destructive',
-                });
+                toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
             }
         } catch (e: any) {
             toast({
                 title: 'Login failed',
-                description: e?.message ?? 'OAuth is not configured (add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env).',
+                description: e?.message ?? 'OAuth is not configured.',
                 variant: 'destructive',
             });
         }

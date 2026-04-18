@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from '@/components/auth/BackgroundDecor';
-import { MessageCircle, BookOpen, TrendingUp, Calendar as CalendarIcon, Smile, Meh, Frown } from "lucide-react";
+import PersonalityTraits from '@/components/PersonalityTraits';
+import { MessageCircle, BookOpen, TrendingUp, Calendar as CalendarIcon, Smile, Meh, Frown, Brain } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useProfile } from "@/hooks/useProfile";
 import { useMoodEntries } from "@/hooks/useMoodEntries";
@@ -394,7 +395,23 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Daily Check-in */}
+          {/* Personality Traits */}
+          <Card className="animate-fade-in-up delay-300">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-primary" />
+                <span>Your Personality Profile</span>
+              </CardTitle>
+              <CardDescription>
+                Big Five personality traits based on your conversations with ELLA
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PersonalityTraits profile={profile} loading={profileLoading} />
+            </CardContent>
+          </Card>
+
+          {/* Today's Check-in */}
           <Card className="animate-fade-in-up delay-300">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Today's Check-in</CardTitle>
@@ -422,6 +439,36 @@ export default function Dashboard() {
                     <p className="text-xs text-muted-foreground">No activity data yet</p>
                   )}
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Stats Row */}
+        <div className="mt-6">
+          <Card className="animate-fade-in-up delay-400">
+            <CardContent className="p-4">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                {statsLoading ? (
+                  <p className="text-sm text-muted-foreground col-span-3">Loading stats...</p>
+                ) : stats ? (
+                  <>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">🌟 {stats.current_streak}</div>
+                      <div className="text-xs text-muted-foreground">Day Streak</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">📊 {stats.mood_improvement_percentage}%</div>
+                      <div className="text-xs text-muted-foreground">Mood Improvement</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-primary">💝 {stats.total_sessions}</div>
+                      <div className="text-xs text-muted-foreground">Total Sessions</div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground col-span-3">No activity data yet</p>
+                )}
               </div>
             </CardContent>
           </Card>
