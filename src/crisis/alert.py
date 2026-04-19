@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Protocol
@@ -130,22 +131,27 @@ class TwilioSMSNotifier:
             return NotificationResult(channel="sms", to=to, success=False, error=str(exc)[:200])
 
 
-# Module-level singletons (lazy)
+# Module-level singletons (lazy, thread-safe via double-checked locking)
 _whatsapp: Optional[TwilioWhatsAppNotifier] = None
 _sms: Optional[TwilioSMSNotifier] = None
+_notifier_lock = threading.Lock()
 
 
 def get_whatsapp_notifier() -> TwilioWhatsAppNotifier:
     global _whatsapp
     if _whatsapp is None:
-        _whatsapp = TwilioWhatsAppNotifier()
+        with _notifier_lock:
+            if _whatsapp is None:
+                _whatsapp = TwilioWhatsAppNotifier()
     return _whatsapp
 
 
 def get_sms_notifier() -> TwilioSMSNotifier:
     global _sms
     if _sms is None:
-        _sms = TwilioSMSNotifier()
+        with _notifier_lock:
+            if _sms is None:
+                _sms = TwilioSMSNotifier()
     return _sms
 
 

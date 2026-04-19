@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from "@/components/auth/BackgroundDecor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,28 +11,59 @@ import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { therapistFetchJson } from "@/lib/therapistFetch";
 import { CaseloadPatient, PatientTherapistLink, SecureMessage, CrisisEvent } from "@/types/auth";
 import {
     Users, Inbox, AlertTriangle, TrendingUp, UserPlus, Briefcase,
-    Search, Loader2, CheckCircle2, XCircle, Clock, Activity, Mail, MessageSquare,
+    Search, Loader2, CheckCircle2, XCircle, Clock, Activity, Mail, MessageSquare, ArrowRight,
 } from "lucide-react";
+
+interface MessageThread {
+    link_id: string;
+    counterparty?: { name?: string; email?: string; display_name?: string };
+    last_message?: SecureMessage | null;
+    unread_count?: number;
+}
 
 type Tab = "overview" | "clients" | "requests" | "messages" | "crisis" | "settings";
 
+const pathToTab = (pathname: string): Tab =>
+    pathname.endsWith("/clients") ? "clients" : "overview";
+
 export default function TherapistDashboard() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { toast } = useToast();
 
-    const [tab, setTab] = useState<Tab>("overview");
+    const [tab, setTab] = useState<Tab>(() => pathToTab(location.pathname));
+
+    useEffect(() => {
+        const urlTab = pathToTab(location.pathname);
+        setTab((prev) => {
+            // Only overwrite from URL when URL points at a routed tab. If the user
+            // is on an inner-only tab (requests/crisis/messages) keep their selection.
+            if (urlTab === "clients") return "clients";
+            if (prev === "overview" || prev === "clients") return urlTab;
+            return prev;
+        });
+    }, [location.pathname]);
+
+    const handleTabChange = (v: string) => {
+        const next = v as Tab;
+        setTab(next);
+        if (next === "clients" && !location.pathname.endsWith("/clients")) {
+            navigate("/therapist-portal/clients", { replace: true });
+        } else if (next === "overview" && location.pathname !== "/therapist-portal") {
+            navigate("/therapist-portal", { replace: true });
+        }
+    };
     const [loading, setLoading] = useState(true);
     const [caseload, setCaseload] = useState<CaseloadPatient[]>([]);
     const [pendingLinks, setPendingLinks] = useState<PatientTherapistLink[]>([]);
     const [crisisEvents, setCrisisEvents] = useState<CrisisEvent[]>([]);
-    const [messages, setMessages] = useState<SecureMessage[]>([]);
+    const [threads, setThreads] = useState<MessageThread[]>([]);
     const [search, setSearch] = useState("");
     const [inviteEmail, setInviteEmail] = useState("");
     const [showInviteDialog, setShowInviteDialog] = useState(false);
@@ -45,12 +76,12 @@ export default function TherapistDashboard() {
                 therapistFetchJson<{ patients: CaseloadPatient[] }>("/api/therapist/patients"),
                 therapistFetchJson<{ links: PatientTherapistLink[] }>("/api/links/pending"),
                 therapistFetchJson<{ events: CrisisEvent[] }>("/api/therapist/crisis"),
-                therapistFetchJson<{ messages: SecureMessage[] }>("/api/therapist/messages"),
+                therapistFetchJson<{ threads: MessageThread[] }>("/api/therapist/messages"),
             ]);
             setCaseload(caseRes.patients || []);
             setPendingLinks(linksRes.links || []);
             setCrisisEvents(crisisRes.events || []);
-            setMessages(msgRes.messages || []);
+            setThreads(msgRes.threads || []);
         } catch (err: any) {
             toast({ title: "Couldn't load data", description: err.message, variant: "destructive" });
         } finally {
@@ -156,7 +187,7 @@ export default function TherapistDashboard() {
                     <StatCard icon={TrendingUp} label="Total sessions" value={stats.totalSessions} color="text-emerald-500" />
                 </div>
 
-                <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+                <Tabs value={tab} onValueChange={handleTabChange}>
                     <TabsList className="grid w-full max-w-3xl grid-cols-5">
                         <TabsTrigger value="overview">Overview</TabsTrigger>
                         <TabsTrigger value="clients">Clients</TabsTrigger>
@@ -306,62 +337,108 @@ export default function TherapistDashboard() {
                         {crisisEvents.length === 0 ? (
                             <EmptyState icon={AlertTriangle} title="No crisis events" description="Any automatic or manual escalations will appear here." />
                         ) : (
-                            crisisEvents.map((event) => (
-                                <Card key={event.event_id} className={`rounded-3xl ${!event.resolved_at ? "border-rose-300 shadow-rose-100" : ""}`}>
-                                    <CardContent className="p-6 space-y-3">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <Badge variant={event.severity === "critical" || event.severity === "high" ? "destructive" : "outline"}>
-                                                    {event.severity}
-                                                </Badge>
-                                                <span className="text-xs text-muted-foreground">
-                                                    {event.created_at && new Date(event.created_at).toLocaleString()}
-                                                </span>
+                            crisisEvents.map((event) => {
+                                const patientName = caseload.find((p) => p.patient_id === event.patient_id)?.name
+                                    ?? caseload.find((p) => p.patient_id === event.patient_id)?.email
+                                    ?? event.patient_id;
+                                const openPatient = () =>
+                                    navigate(`/therapist-portal/patients/${event.patient_id}?tab=crisis&event=${event.event_id}`);
+                                return (
+                                    <Card
+                                        key={event.event_id}
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={openPatient}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                openPatient();
+                                            }
+                                        }}
+                                        className={`rounded-3xl cursor-pointer transition-all hover:shadow-lg hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${!event.resolved_at ? "border-rose-300 shadow-rose-100" : ""}`}
+                                    >
+                                        <CardContent className="p-6 space-y-3">
+                                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <Badge variant={event.severity === "critical" || event.severity === "high" ? "destructive" : "outline"}>
+                                                        {event.severity}
+                                                    </Badge>
+                                                    {typeof event.severity_score === "number" && (
+                                                        <Badge variant="outline" className="text-[10px]">score {event.severity_score.toFixed(2)}</Badge>
+                                                    )}
+                                                    {event.intervention_type && event.intervention_type !== "modal_shown" && (
+                                                        <Badge variant="secondary" className="text-[10px]">{event.intervention_type.replace(/_/g, " ")}</Badge>
+                                                    )}
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {event.created_at && new Date(event.created_at).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                                {event.resolved_at ? (
+                                                    <Badge variant="secondary">Resolved</Badge>
+                                                ) : (
+                                                    <span className="text-xs text-rose-600 font-medium inline-flex items-center gap-1">
+                                                        Open patient file <ArrowRight className="h-3.5 w-3.5" />
+                                                    </span>
+                                                )}
                                             </div>
-                                            {event.resolved_at ? (
-                                                <Badge variant="secondary">Resolved</Badge>
-                                            ) : (
-                                                <Button size="sm" variant="outline" onClick={() => navigate(`/therapist-portal/patients/${event.patient_id}`)}>
-                                                    Open patient
-                                                </Button>
+                                            <div className="text-sm">
+                                                <p className="font-medium">{patientName}</p>
+                                                <p className="text-xs text-muted-foreground">Triggered by: {event.triggered_by}</p>
+                                            </div>
+                                            {event.trigger_text && (
+                                                <div className="rounded-xl border border-border bg-muted/30 p-3">
+                                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">What triggered this</p>
+                                                    <p className="text-sm whitespace-pre-wrap line-clamp-4">{event.trigger_text}</p>
+                                                </div>
                                             )}
-                                        </div>
-                                        <div className="text-sm">
-                                            <p className="font-medium">Patient: {event.patient_id}</p>
-                                            <p className="text-muted-foreground">Triggered by: {event.triggered_by}</p>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            ))
+                                            {event.keyword_matches && event.keyword_matches.length > 0 && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {event.keyword_matches.slice(0, 8).map((kw, i) => (
+                                                        <Badge key={i} variant="outline" className="text-[10px]">{kw}</Badge>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </CardContent>
+                                    </Card>
+                                );
+                            })
                         )}
                     </TabsContent>
 
                     <TabsContent value="messages" className="space-y-4 mt-6">
-                        {messages.length === 0 ? (
+                        {threads.length === 0 ? (
                             <EmptyState
                                 icon={MessageSquare}
-                                title="No messages yet"
-                                description="Async messages with your patients will appear here."
+                                title="No conversations yet"
+                                description="Threads with your patients will appear here once you're linked."
                                 action={<Button variant="outline" onClick={() => navigate("/therapist-portal/messages")}><Inbox className="h-4 w-4 mr-2" /> Open inbox</Button>}
                             />
                         ) : (
                             <>
                                 <Button variant="outline" onClick={() => navigate("/therapist-portal/messages")}><Inbox className="h-4 w-4 mr-2" /> Open full inbox</Button>
-                                {messages.slice(0, 10).map((m) => (
-                                    <Card key={m.message_id} className="rounded-2xl">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <Badge variant={m.urgency === "urgent" ? "destructive" : m.urgency === "priority" ? "default" : "outline"}>
-                                                    {m.urgency}
-                                                </Badge>
-                                                <span className="text-xs text-muted-foreground">
-                                                    {m.created_at && new Date(m.created_at).toLocaleString()}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm line-clamp-2">{m.body}</p>
-                                        </CardContent>
-                                    </Card>
-                                ))}
+                                {threads.slice(0, 10).map((t) => {
+                                    const name = t.counterparty?.display_name || t.counterparty?.name || t.counterparty?.email || "Patient";
+                                    const last = t.last_message;
+                                    return (
+                                        <Card key={t.link_id} className="rounded-2xl cursor-pointer hover:bg-muted/40" onClick={() => navigate("/therapist-portal/messages")}>
+                                            <CardContent className="p-4">
+                                                <div className="flex items-center justify-between mb-2 gap-2">
+                                                    <p className="font-medium text-sm">{name}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        {(t.unread_count ?? 0) > 0 && <Badge className="h-5 px-1.5 text-[10px]">{t.unread_count}</Badge>}
+                                                        {last?.urgency && last.urgency !== "normal" && (
+                                                            <Badge variant={last.urgency === "urgent" ? "destructive" : "default"} className="text-[10px]">{last.urgency}</Badge>
+                                                        )}
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {last?.created_at && new Date(last.created_at).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <p className="text-sm line-clamp-2 text-muted-foreground">{last?.body ?? "No messages yet."}</p>
+                                            </CardContent>
+                                        </Card>
+                                    );
+                                })}
                             </>
                         )}
                     </TabsContent>

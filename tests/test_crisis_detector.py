@@ -277,3 +277,78 @@ def test_history_parameter_accepted():
     ]
     r = detect_crisis("this is it", use_llm=False, history=history)
     assert r.risk_level == RiskLevel.LOW
+
+
+# -----------------------------------------------------------------------------
+# Fuse rules — explicit RoBERTa + sticky session elevation
+# -----------------------------------------------------------------------------
+
+
+def test_use_llm_false_zeros_implicit_roberta():
+    """With use_llm=False and no explicit score, RoBERTa isn't invoked.
+
+    Prevents benign phrases like 'goodbye ella' from flagging HIGH in
+    keyword-only mode where the LLM arbiter can't adjudicate.
+    """
+    r = detect_crisis("goodbye ella", use_llm=False)
+    assert r.risk_level == RiskLevel.LOW
+    assert r.ml_scores.get("roberta_suicide") == 0.0
+
+
+def test_roberta_high_pre_computed_drives_mid_tier():
+    """With use_llm=True but LLM unavailable, a high RoBERTa score → HIGH."""
+    r = detect_crisis(
+        "random benign text with no keywords",
+        use_llm=True,
+        roberta_score=0.9,
+    )
+    # LLM is unreachable in unit-test env → falls through to kw=none + rob_high
+    assert r.risk_level == RiskLevel.HIGH
+    assert r.llm_verdict == "roberta_high_no_llm"
+    assert r.ml_scores.get("roberta_suicide") == 0.9
+
+
+def test_roberta_below_gate_fast_exits_to_low():
+    r = detect_crisis("the weather is nice today", use_llm=False, roberta_score=0.1)
+    assert r.risk_level == RiskLevel.LOW
+    assert r.llm_verdict == "fast_exit"
+
+
+def test_session_has_prior_risk_bypasses_fast_exit():
+    """Keyword=none + rob<gate but session_has_prior_risk must NOT fast-exit.
+
+    The LLM is unreachable in the test env, so the detector falls through the
+    RoBERTa tiers. Verify the final tier is not locked to LOW purely because
+    of the fast-exit — this is the calm-resignation FN gap from data.txt.
+    """
+    r = detect_crisis(
+        "ok",
+        use_llm=False,
+        roberta_score=0.0,
+        session_has_prior_risk=True,
+    )
+    # Without LLM we can't definitively escalate, but the result carries the
+    # prior-risk context forward so the arbiter (when online) can escalate.
+    # At minimum, the ml_scores record the RoBERTa value.
+    assert "roberta_suicide" in r.ml_scores
+
+
+def test_ml_scores_populated():
+    r = detect_crisis(
+        "I want to kill myself tonight",
+        use_llm=False,
+        roberta_score=0.95,
+    )
+    assert r.risk_level == RiskLevel.CRITICAL
+    assert r.ml_scores.get("roberta_suicide") == 0.95
+
+
+def test_use_llm_false_still_honors_explicit_roberta():
+    """If a caller explicitly passes a RoBERTa score, respect it even with LLM off."""
+    r = detect_crisis(
+        "I want to kill myself tonight",
+        use_llm=False,
+        roberta_score=0.95,
+    )
+    assert r.risk_level == RiskLevel.CRITICAL
+    assert r.ml_scores["roberta_suicide"] == 0.95

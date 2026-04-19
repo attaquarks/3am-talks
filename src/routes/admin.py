@@ -23,6 +23,7 @@ from core.helpers import (
     _require_confirm_token,
     _select_optional_table,
     _is_missing_table_error,
+    _parse_pagination,
     get_manager,
     require_admin,
 )
@@ -178,9 +179,13 @@ def admin_users(request: Request):
         })
 
     users_sorted = sorted(users, key=lambda u: str(u.get("created_at") or ""), reverse=True)
+    limit, offset = _parse_pagination(request, default_limit=50, max_limit=500)
+    page = users_sorted[offset : offset + limit]
     return {
-        "users": users_sorted,
+        "users": page,
         "total": len(users_sorted),
+        "limit": limit,
+        "offset": offset,
     }
 
 

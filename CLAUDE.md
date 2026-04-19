@@ -1,17 +1,30 @@
-# CLAUDE.md
+# Project Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the orientation doc for engineers and coding agents working in
+this repository. Keep it up-to-date whenever the architecture, routing surface,
+or cross-module contracts change — it is the first thing new contributors
+(human or automated) read.
+
+---
 
 ## Project Overview
 
-**Ella Speaks Calmly** (formerly 3AM Talks) is an AI-powered therapy and counseling system. It provides personalized mental health support through:
-- Personality-aware responses (BERT-based personality assessment)
-- Retrieval-augmented generation (RAG) using Pinecone for therapeutic technique retrieval
-- Evidence-based therapy techniques (CBT, DBT, ACT)
-- Real-time voice conversations via LiveKit
-- Multi-session crisis detection with WhatsApp/SMS emergency alerts (Twilio)
-- Therapist portal with patient management, notes, treatment plans, and homework
-- Admin dashboard with user management, analytics, reports, and announcements
+**Ella Speaks Calmly** (formerly *3AM Talks*) is an AI-powered therapy and
+counseling system. It provides personalized mental-health support through:
+
+- Personality-aware responses (BERT-based personality assessment).
+- Retrieval-augmented generation (RAG) using Pinecone for therapeutic
+  technique retrieval.
+- Evidence-based therapy techniques (CBT, DBT, ACT).
+- Real-time voice conversations via LiveKit.
+- **Three-stage** crisis detection (keyword → RoBERTa → LLM arbiter) shared
+  between text and voice, with WhatsApp / SMS emergency alerts via Twilio.
+- Therapist portal with patient management, notes, treatment plans, homework,
+  secure messaging, and a patient-visible access log.
+- Admin dashboard with user management, analytics, reports, announcements,
+  and audit logs.
+
+---
 
 ## Architecture
 
@@ -20,217 +33,407 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │                      Frontend (React + Vite)                     │
 │                  localhost:5173                                  │
 │   Roles: Patient, Therapist, Admin                              │
-│   Pages: Landing, Auth, Dashboard, Therapist, History, Profile, │
-│          Safety, AdminDashboard, TherapistDashboard, MyTherapists│
+│   Pages: Landing, Auth, Dashboard, Chat, History, Profile,      │
+│          Safety, MyTherapists, PatientMessages, PatientAccess-  │
+│          Log, AdminDashboard, TherapistDashboard, PatientView,  │
+│          TherapistMessages, TherapistPending, InviteAccept, ... │
 └────────────────────────────┬────────────────────────────────────┘
-                             │ HTTP/WebSocket
+                             │ HTTP / WebSocket / LiveKit WS
 ┌────────────────────────────▼────────────────────────────────────┐
-│                   Backend (FastAPI)                              │
-│                  localhost:5050                                  │
-│   src/main.py                - App entry, middleware, routers    │
-│   src/config.py              - Centralized configuration         │
-│   src/core/                  - Sessions, auth guards, rate limit │
-│   src/routes/auth.py         - Register/login/OAuth              │
-│   src/routes/chat.py         - Main conversation endpoint        │
-│   src/routes/admin.py        - Admin dashboard routes            │
-│   src/routes/crisis.py       - Crisis detection & alert routes   │
-│   src/routes/therapist.py    - Therapist portal routes           │
-│   src/routes/data.py         - Generic table CRUD                │
-│   src/routes/user.py         - Current-user profile routes       │
-│   src/routes/voice.py        - Voice-agent bootstrap/chat        │
+│                   Backend (FastAPI, port 5050)                   │
+│                                                                  │
+│   src/main.py                 - App entry, middleware, routers   │
+│   src/config.py               - Centralized configuration        │
+│   src/core/                   - Sessions, auth guards, rate lim. │
+│   src/routes/auth.py          - Register / login / OAuth         │
+│   src/routes/chat.py          - /api/chat (therapy + crisis)     │
+│   src/routes/voice.py         - /api/voice/* (HMAC-verified)     │
+│   src/routes/admin.py         - Admin dashboard routes           │
+│   src/routes/crisis.py        - Crisis settings / events / test  │
+│   src/routes/therapist.py     - Portal + shared patient router   │
+│   src/routes/data.py          - Generic /api/data/{table}        │
+│   src/routes/user.py          - Current-user profile + account   │
 │   src/conversation/manager.py - Session orchestration            │
 │   src/conversation/summary.py - Conversation summarization       │
-│   src/crisis/service.py      - Multi-session crisis detection    │
-│   src/crisis/alert.py        - Twilio WhatsApp/SMS alerts        │
+│   src/crisis/service.py       - Keyword + RoBERTa + LLM fusion   │
+│   src/crisis/integration.py   - Shared pipeline for chat+voice   │
+│   src/crisis/roberta_client.py- Local/remote suicide-prob model  │
+│   src/crisis/alert.py         - Twilio notifiers + countdown     │
 └──────────┬─────────────────┬─────────────────┬──────────────────┘
            │                 │                 │
            ▼                 ▼                 ▼
     ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────────┐
     │   Supabase   │  │   Pinecone   │  │  Colab OpenAI-compatible LLM │
-    │   Database   │  │   (RAG)      │  │  (psychocounsel endpoint)    │
+    │   Database   │  │    (RAG)     │  │   (psychocounsel endpoint)   │
     └──────────────┘  └──────────────┘  └──────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
 │              Voice Agent (separate process)                      │
-│   src/voice/agent.py - LiveKit + Edge TTS / ElevenLabs          │
-│   Pipeline: Silero VAD → ElevenLabs STT → LLM → TTS            │
+│   src/voice/agent.py — LiveKit worker (Ella)                    │
+│   Pipeline: Silero VAD → ElevenLabs STT → backend → TTS         │
+│   Crisis events from /api/voice/chat are re-published to the    │
+│   LiveKit data channel so the frontend CrisisCountdownModal     │
+│   opens alongside the TTS reply.                                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## Key Directories
 
-- `src/` - Python backend (modularized)
-  - `main.py` - FastAPI entry point (port 5050), lifespan, middleware, routers
-  - `config.py` - Centralized runtime configuration
-  - `core/` - Shared infrastructure
-    - `sessions.py` - Cookie signing, session store, SESSION_SECRET fail-fast
-    - `helpers.py` - Auth guards (`require_user`, `require_admin`, `require_voice_agent`), DB helpers
-    - `rate_limit.py` - Shared slowapi Limiter singleton
-  - `routes/` - HTTP route modules
-    - `auth.py` - Register/login/OAuth (rate-limited, CSRF-nonce protected)
-    - `chat.py` - Main conversation endpoint (rate-limited)
-    - `admin.py` - Admin dashboard endpoints
-    - `crisis.py` - `/api/v1/crisis/*` — settings, contacts, events, test-alert (rate-limited)
-    - `therapist.py` - `/api/therapist/*` — linking, notes, treatment plans, homework, messaging, reports
-    - `data.py` - Generic table CRUD
-    - `user.py` - Current-user profile
-    - `voice.py` - Voice agent bootstrap + chat (HMAC-verified)
+- `src/` — Python backend (modularized)
+  - `main.py` — FastAPI entry point (port 5050); lifespan, middleware,
+    router registration. **Both** `therapist_router` and
+    `therapist_shared_router` are registered here — the second one owns the
+    patient-facing endpoints that live in `routes/therapist.py`.
+  - `config.py` — Centralized runtime configuration.
+  - `core/` — Shared infrastructure.
+    - `sessions.py` — Cookie signing, session store, `SESSION_SECRET`
+      fail-fast on boot.
+    - `helpers.py` — Auth guards (`require_user`, `require_admin`,
+      `require_voice_agent`), DB helpers, and `_parse_pagination()` (used
+      by chat, admin, and any paginated list route — clamps `limit` and
+      `offset` with safe defaults).
+    - `rate_limit.py` — Shared slowapi `Limiter` singleton.
+  - `routes/` — HTTP route modules.
+    - `auth.py` — Register / login / OAuth (rate-limited, CSRF-nonce
+      protected; OAuth nonce cookie is deliberately `SameSite=Lax` because
+      it is read after a cross-site redirect).
+    - `chat.py` — `/api/chat` runs `process_message_with_crisis`
+      (therapy LLM + crisis detector in parallel). `/api/conversations`
+      and `/api/conversations/{id}/messages` are paginated via
+      `_parse_pagination`.
+    - `voice.py` — `/api/voice/bootstrap` and `/api/voice/chat`.
+      HMAC-verified (`VOICE_AGENT_SECRET`). `/api/voice/chat` also runs
+      `process_message_with_crisis`; when a crisis is detected the payload
+      is forwarded to the voice agent which republishes it on the LiveKit
+      data channel.
+    - `admin.py` — Admin dashboard endpoints; `/api/admin/users` is
+      paginated (`default_limit=50`, `max_limit=500`).
+    - `crisis.py` — `/api/v1/crisis/*` (settings, contacts, events,
+      location, cancel-alert, test-alert). Rate-limited.
+    - `therapist.py` — Two routers:
+      - `router` (prefix `/api/therapist`) — therapist-only endpoints
+        (notes, treatment plans, homework, messaging, patient list).
+      - `shared_router` (no prefix) — endpoints that both patients and
+        therapists hit: `/api/patient/homework`, `/api/invite-therapist`,
+        `/api/links/*`, `/api/invite/info`, `/api/invite/accept`.
+      Separating them keeps the `/api/therapist` prefix scope-gated
+      without breaking the patient-facing URLs.
+    - `data.py` — Generic `/api/data/{table}` CRUD.
+    - `user.py` — Current-user profile + account management.
   - `conversation/`
-    - `manager.py` - Main orchestrator for therapy sessions
-    - `summary.py` - Conversation summarization (pooled HTTP client)
-    - `questionnaire.py` - Personality questionnaire system
+    - `manager.py` — Main orchestrator for therapy sessions.
+    - `summary.py` — Conversation summarization (pooled httpx client).
+    - `questionnaire.py` — Personality questionnaire system.
   - `crisis/`
-    - `service.py` - Multi-session crisis detection logic
-    - `alert.py` - Twilio WhatsApp/SMS alerts (consent re-checked before dispatch)
-    - `data/helplines.json` - Static helpline directory
+    - `service.py` — Three-stage engine (see
+      [Crisis Pipeline](#crisis-detection-pipeline) below). Also still
+      exports the legacy `scan_messages(...)` used by therapist SOAP
+      summaries — do not modify its signature.
+    - `integration.py` — `process_message_with_crisis()` runs the therapy
+      response and `detect_and_maybe_alert()` concurrently with
+      `asyncio.gather(..., return_exceptions=True)`. This is the **only**
+      integration seam both `/api/chat` and `/api/voice/chat` call.
+    - `roberta_client.py` — Suicide-prediction head. Local mode loads
+      `Models/roberta-base-suicide-prediction-phr/` (falls back to the HF
+      id on miss). Remote mode is enabled by setting `ROBERTA_REMOTE_URL`.
+      Never raises — failures return `0.0` so the rest of the pipeline
+      still runs.
+    - `alert.py` — Twilio WhatsApp/SMS notifiers (thread-safe lazy
+      singletons), `start_countdown` / `cancel_active_countdown` /
+      `run_countdown_and_fire`. **Consent is re-checked immediately
+      before dispatch**, not only at countdown start.
+    - `data/helplines.json` — Static helpline directory used by locale
+      lookup.
   - `voice/`
-    - `agent.py` - LiveKit voice agent for real-time audio
-    - `tts_plugin.py` - Edge TTS plugin
-  - `ai_layer/` - LLM service (`llm_service.py`) and personality detection (`personality_service.py`)
-  - `rag_layer/` - Pinecone RAG engine and service
-  - `database/` - Supabase client and user service
-- `frontend/` - React + TypeScript frontend (Vite)
-  - `client/src/pages/` - Main app pages (Landing, Auth, Dashboard, Therapist, History, Profile, Safety, About, LearnMore, AdminDashboard, AdminProfile, TherapistDashboard, TherapistProfile, TherapistMessages, TherapistPending, MyTherapists, PatientView, InviteAccept)
-  - `client/src/components/` - Reusable UI components (Navigation, VoiceCall, CrisisCountdownModal, AuthWrapper, ThemeProvider, plus subdirs: admin/, auth/, patient/, shared/)
-  - `client/src/context/` - React context providers (AuthContext)
-- `Models/` - ML model files (BERT personality model)
-- `Docs/` - Project documentation (crisis roadmap, setup guides, research papers, SQL migrations)
-- `supabase/` - Supabase config and migrations
-- `tests/` - Test suite (`test_full_system.py`, `test_crisis_detector.py`)
+    - `agent.py` — LiveKit voice agent worker (transport layer only).
+      Accepts a `room` handle so it can `publish_data` crisis events to
+      the browser. When launched as `python src/voice/agent.py dev`,
+      Python puts `src/voice/` on `sys.path`; `agent.py` prepends `src/`
+      so imports like `from voice.tts_plugin import TTS` resolve.
+    - `tts_plugin.py` — Edge TTS plugin (used as fallback).
+  - `ai_layer/` — LLM service (`llm_service.py`) and personality
+    detection (`personality_service.py`).
+  - `rag_layer/` — Pinecone RAG engine and service.
+  - `database/` — Supabase client and user service.
+
+- `frontend/` — React + TypeScript frontend (Vite).
+  - `client/src/pages/`
+    - Patient: `Landing`, `Auth`, `Dashboard`, `Chat` (in `Therapist.tsx`
+      for legacy naming), `History`, `Profile`, `Safety`, `MyTherapists`,
+      `PatientMessages`, `PatientAccessLog`.
+    - Therapist: `TherapistDashboard`, `TherapistProfile`,
+      `TherapistMessages`, `TherapistPending`, `PatientView`.
+    - Admin: `AdminDashboard`, `AdminProfile`.
+    - Shared: `About`, `LearnMore`, `InviteAccept`.
+  - `client/src/components/` — Reusable UI (`Navigation`, `VoiceCall`,
+    `CrisisCountdownModal`, `AuthWrapper`, `ThemeProvider`, plus subdirs
+    `admin/`, `auth/`, `patient/`, `shared/`).
+  - `client/src/context/` — React context providers (`AuthContext`).
+
+- `Models/` — ML checkpoints (BERT personality head; RoBERTa suicide head).
+  Gitignored.
+- `Docs/` — Crisis roadmap, setup guides, research papers, SQL migrations.
+- `supabase/` — Supabase config and migrations.
+- `tests/`
+  - `conftest.py` — Loads `.env` and prepends `src/` to `sys.path` so
+    modules that read env vars at import time don't crash.
+  - `test_full_system.py` — End-to-end smoke.
+  - `test_crisis_detector.py` — Stage-1/2/3 + fusion unit tests.
+  - `test_therapist_auth.py` — Portal authorization primitives: SEC-003
+    scope-fails-closed, AUTH-002 link-required enforcement, AUTH-003
+    homework-update link check.
+
+---
 
 ## Development Commands
 
 ### Backend
 ```bash
-# Activate virtual environment and install dependencies
 python -m venv .venv
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux / macOS
 pip install -r requirements.txt
 
-# Run backend API server (port 5050)
-python src/main.py
-
-# Run voice agent separately
-python src/voice/agent.py dev
+python src/main.py            # API on :5050
+python src/voice/agent.py dev # voice worker (separate process)
 ```
 
 ### Frontend
 ```bash
 cd frontend
 npm install
-npm run dev      # Development server (port 5173)
-npm run build    # Production build
-npm run check    # TypeScript type checking
+npm run dev                   # :5173
+npm run build
+npm run check                 # TypeScript
 ```
 
 ### Start All Services
 ```bash
-# Windows
-start.bat
-
-# Linux/Mac
-./start.sh
+start.bat                     # Windows
+# ./start.sh                  # Linux / macOS
 ```
 
 ### Testing
 ```bash
-# Run tests with pytest
 pytest tests/
-
-# Run specific test files
-pytest tests/test_full_system.py
 pytest tests/test_crisis_detector.py
+pytest tests/test_therapist_auth.py
+pytest tests/test_full_system.py
 ```
+
+---
 
 ## Environment Setup
 
-Required environment variables in `.env`:
-- `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_KEY` - Supabase anon key
-- `PINECONE_API_KEY` - Pinecone API key
-- `PINECONE_ENVIRONMENT` - Pinecone environment (e.g., us-east-1)
-- `PINECONE_INDEX_NAME` - Pinecone index name (default: 3am-talks-rag)
-- `SESSION_SECRET` - Secret for cookie signing
-- `LIVEKIT_URL` - LiveKit server URL
-- `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` - LiveKit credentials
-- `ELEVEN_API_KEY` - ElevenLabs API key (for STT/TTS)
-- `COLAB_API_URL` - Optional: External LLM API URL
-- `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` - Twilio credentials (for crisis WhatsApp/SMS alerts)
-- `TWILIO_WHATSAPP_FROM` - Twilio WhatsApp sender number
+Required environment variables (`.env` in project root):
+
+- `SUPABASE_URL`, `SUPABASE_KEY`
+- `SESSION_SECRET` *(fail-fast on missing)*
+- `PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`
+  *(default `3am-talks-rag`)*
+- `COLAB_API_URL` — OpenAI-compatible LLM endpoint (also used by the
+  crisis arbiter)
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+- `ELEVEN_API_KEY`
+- `VOICE_AGENT_SECRET` — HMAC shared secret between backend and voice agent
+
+Optional:
+
+- `COLAB_API_KEY` — auth header for Colab (defaults to `EMPTY`)
+- `CRISIS_ARBITER_MODEL` — model name for the arbiter (default `psychocounsel`)
+- `ROBERTA_REMOTE_URL` — if set, RoBERTa is scored over HTTP instead of
+  loaded locally
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` —
+  crisis alert dispatch
+
+---
 
 ## Prerequisites
 
 1. **LiveKit server** for voice agent:
-   - Windows: Run `livekit-server.exe` from `livekit-server/` directory
-   - Or use LiveKit Cloud
+   - Windows: run `livekit-server.exe` from `livekit-server/`.
+   - Or use LiveKit Cloud.
+2. **Local RoBERTa checkpoint** at
+   `Models/roberta-base-suicide-prediction-phr/` *or* `ROBERTA_REMOTE_URL`
+   pointing at a `/classify` endpoint. Without either, the RoBERTa stage
+   returns `0.0` and the pipeline falls back to keyword + LLM arbiter only.
+
+---
 
 ## API Endpoints
 
-Backend API runs on `localhost:5050`:
+Backend API runs on `localhost:5050`.
 
-### Core (`src/routes/auth.py`, `src/routes/chat.py`, `src/routes/user.py`, `src/routes/data.py`, `src/routes/voice.py`)
-- `/api/health` - Health check
-- `/api/register`, `/api/login`, `/api/logout` - Authentication
-- `/api/auth/social`, `/api/auth/oauth/{provider}/start`, `/api/auth/oauth/session` - OAuth flows
-- `/api/user` - Get current user
-- `/api/account/email`, `/api/account/password` - Account management
-- `/api/account` (DELETE) - Delete account
-- `/api/chat` - Main conversation endpoint
-- `/api/data/{table}` - Generic CRUD for Supabase tables
-- `/api/livekit/token` - LiveKit room token generation
-- `/api/voice/bootstrap`, `/api/voice/chat` - Voice session endpoints
+### Core
+- `/api/health` — Health check.
+- `/api/register`, `/api/login`, `/api/logout` — Authentication.
+- `/api/auth/social`, `/api/auth/oauth/{provider}/start`,
+  `/api/auth/oauth/session` — OAuth flows.
+- `/api/user` — Get current user.
+- `/api/account/email`, `/api/account/password`, `DELETE /api/account`.
+- `/api/chat` — Main conversation endpoint. Runs the therapy LLM and
+  crisis detector in parallel. On HIGH/CRITICAL the response contains a
+  `crisis` field with `risk_level`, `event_id`, and (CRITICAL + consent)
+  a `countdown` object.
+- `/api/conversations`, `/api/conversations/active`,
+  `/api/conversations/{id}/messages` — Paginated via `_parse_pagination`.
+- `/api/data/{table}` — Generic CRUD for Supabase tables.
+- `/api/livekit/token` — LiveKit room token generation.
+- `/api/voice/bootstrap`, `/api/voice/chat` — Voice session endpoints.
+  HMAC-verified with `VOICE_AGENT_SECRET`. `/api/voice/chat` also emits
+  the `crisis` field; the voice agent forwards it over the LiveKit data
+  channel as `{"type": "crisis.countdown.start", ...}`.
 
 ### Admin (`src/routes/admin.py`)
-- `/api/admin/overview`, `/api/admin/analytics` - Dashboard stats
-- `/api/admin/users` - User management (list, status, role, delete)
-- `/api/admin/reports`, `/api/admin/feedback` - Content moderation
-- `/api/admin/therapists/queue` - Therapist verification queue
-- `/api/admin/announcements` - System announcements
-- `/api/admin/logs` - Audit logs
+- `/api/admin/overview`, `/api/admin/analytics` — Dashboard stats.
+- `/api/admin/users` — Paginated user list (up to 500 per page).
+- `/api/admin/reports`, `/api/admin/feedback` — Content moderation.
+- `/api/admin/therapists/queue` — Therapist verification queue.
+- `/api/admin/announcements` — System announcements.
+- `/api/admin/logs` — Audit logs.
 
-### Therapist Portal (`src/routes/therapist.py`)
-- `/api/therapist/register`, `/api/therapist/me` - Therapist profile
-- `/api/therapist/patients` - Patient list and details
-- `/api/therapist/notes`, `/api/therapist/treatment-plans`, `/api/therapist/homework` - Clinical tools
-- `/api/therapist/messages` - Therapist-patient messaging
-- `/api/therapist/crisis` - Crisis event management
-- `/api/invite-therapist`, `/api/therapist/invite-patient` - Linking invitations
-- `/api/links/*` - Accept/decline/revoke patient-therapist links
-- `/api/reports`, `/api/feedback` - User reports and feedback
+### Therapist Portal (`src/routes/therapist.py` — `router`)
+- `/api/therapist/register`, `/api/therapist/me` — Therapist profile.
+- `/api/therapist/patients` — Patient list and details.
+- `/api/therapist/notes`, `/api/therapist/treatment-plans`,
+  `/api/therapist/homework` — Clinical tools.
+- `/api/therapist/messages` — Therapist ↔ patient messaging.
+- `/api/therapist/crisis` — Crisis event management.
+- `/api/reports`, `/api/feedback` — Reports and feedback.
+
+### Patient / Shared (`src/routes/therapist.py` — `shared_router`)
+- `/api/patient/homework` — Patient-visible homework list.
+- `/api/invite-therapist` — Patient invites a therapist.
+- `/api/therapist/invite-patient` — Therapist invites a patient.
+- `/api/links`, `/api/links/pending` — Link listing.
+- `/api/links/{id}/accept|decline|confirm-consent|revoke`.
+- `/api/invite/info`, `/api/invite/accept` — Invitation token handling.
 
 ### Crisis System (`src/routes/crisis.py`)
-- `/api/v1/crisis/settings` - User crisis preferences
-- `/api/v1/crisis/contacts` - Emergency contact management
-- `/api/v1/crisis/location` - Location for nearest helpline lookup
-- `/api/v1/crisis/events` - Crisis event history
-- `/api/v1/crisis/cancel-alert`, `/api/v1/crisis/test-alert` - Alert management
+- `/api/v1/crisis/settings` — User crisis preferences.
+- `/api/v1/crisis/contacts` — Emergency contact CRUD.
+- `/api/v1/crisis/location` — Location for nearest-helpline lookup.
+- `/api/v1/crisis/events` — Crisis event history.
+- `/api/v1/crisis/cancel-alert`, `/api/v1/crisis/test-alert`.
+
+---
+
+## Crisis Detection Pipeline
+
+The entry point for both `/api/chat` and `/api/voice/chat` is
+`process_message_with_crisis()` in `src/crisis/integration.py`. It runs two
+coroutines concurrently:
+
+1. `mgr.process_message(...)` — the normal therapy reply (LLM + RAG).
+2. `detect_and_maybe_alert(...)` — the safety pipeline.
+
+### Detector stages (`crisis.service.detect_crisis`)
+
+1. **Stage 1 — `keyword_scan`** (&lt;10 ms).
+   - Tiered regex dictionaries: `CRITICAL_PHRASES`, `HIGH_PHRASES`,
+     `MEDIUM_PHRASES`.
+   - Contextual modifiers (`tonight`, `pills`, `bridge`, `plan`, etc.)
+     bump tier by one.
+2. **Stage 1.5 — RoBERTa suicide probability** (`roberta_client.score`).
+   - Gates: `_ROBERTA_GATE=0.35`, `_ROBERTA_MID=0.60`, `_ROBERTA_HIGH=0.85`.
+   - Skipped entirely when the caller passes `use_llm=False` and no
+     `roberta_score` (keyword-only mode — e.g. unit tests) to avoid
+     flagging benign phrases like "goodbye ella".
+3. **Stage 2 — LLM arbiter** (`llm_arbitrate`).
+   - Called only when tier ≠ `none`, RoBERTa ≥ gate, or the session has
+     a prior HIGH/CRITICAL event.
+   - Two prompt templates: `_LLM_ARBITER_USER_TEMPLATE` (no history) and
+     `_LLM_ARBITER_CONTEXT_TEMPLATE` (with up to the last 10 turns). The
+     context template adds explicit escalation rules so calm-resignation
+     after prior ideation is treated as a severity signal, not
+     reassurance.
+   - If the LLM is unreachable → `available=False`; the fuser falls back
+     conservatively.
+
+### Fusion (`_fuse`)
+- Keyword CRITICAL → CRITICAL (unless LLM clearly says hyperbole or
+  third-party and no intent, in which case → HIGH).
+- Keyword HIGH + LLM `intent` + imminence ≥ medium → CRITICAL.
+- Keyword NONE + `session_has_prior_risk` + LLM `intent`/`escalating` →
+  HIGH or CRITICAL. This "sticky session" rule closes the dominant
+  false-negative class (calm resignation after prior ideation), measured
+  on 132 labeled real messages.
+- LLM unreachable + keyword CRITICAL → still CRITICAL (over-alert safer).
+
+### After detection
+`detect_and_maybe_alert` only returns a payload when the risk is
+HIGH or CRITICAL. For CRITICAL + consent, it:
+
+1. Cancels any lingering countdown.
+2. Logs a `crisis_events` row (severity, score, reasoning, trigger text).
+3. Starts a new countdown (10–120 s, configurable per user).
+4. Schedules `run_countdown_and_fire` as a background task.
+
+The frontend receives the `crisis` field on the chat response and opens
+`CrisisCountdownModal`. For voice, `src/voice/agent.py` republishes the
+same payload on the LiveKit data channel so the browser modal opens
+alongside the spoken response.
+
+---
 
 ## Code Conventions
 
 ### Backend (Python)
-- Uses `python-dotenv` for environment loading
-- Pydantic models for request/response validation
-- Lazy initialization pattern for ConversationManager (see `get_manager()` in api.py)
-- Route modules register via functions (e.g., `register_crisis_routes(app)`, `register_therapist_routes(app)`)
-- Logging with standard `logging` module
+- `python-dotenv` for environment loading; `conftest.py` ensures tests
+  see the same `.env`.
+- Pydantic models for request / response validation.
+- Lazy initialization pattern for `ConversationManager`
+  (`get_manager()` in `src/core/helpers.py`).
+- Route modules expose an `APIRouter` named `router`; where patient and
+  therapist share endpoints, a second `shared_router` lives in the same
+  module (see `src/routes/therapist.py`) and is registered separately in
+  `src/main.py`.
+- `_parse_pagination(request, default_limit, max_limit)` is the canonical
+  way to read `?limit=`/`?offset=` from any list endpoint.
+- Thread-safe lazy singletons use double-checked locking with a module
+  `threading.Lock` (see `src/crisis/alert.py`).
+- Logging with the standard `logging` module; each subsystem uses a
+  named logger (`3am-chat`, `3am-voice`, `ella-voice`, etc.).
 
-### Frontend (TypeScript/React)
-- Uses `@/` path alias for `client/src/`
-- Radix UI components with Tailwind CSS
-- React Router for routing
-- TanStack Query for server state
-- AuthContext wraps the entire app
-- Role-based pages: patient (Dashboard, History, Profile, Safety, MyTherapists), therapist (TherapistDashboard, PatientView, TherapistMessages), admin (AdminDashboard, AdminProfile)
+### Frontend (TypeScript / React)
+- Uses `@/` path alias for `client/src/`.
+- Radix UI components with Tailwind CSS.
+- React Router for routing.
+- TanStack Query for server state.
+- `AuthContext` wraps the entire app; `AuthWrapper` handles
+  role-based redirects and supports nested patient paths (e.g.
+  `/my-therapists/messages`) via prefix matching.
+- Role-based pages:
+  - Patient: `Dashboard`, `History`, `Profile`, `Safety`, `MyTherapists`,
+    `PatientMessages`, `PatientAccessLog`.
+  - Therapist: `TherapistDashboard`, `PatientView`, `TherapistMessages`,
+    `TherapistPending`, `TherapistProfile`.
+  - Admin: `AdminDashboard`, `AdminProfile`.
+- `therapistFetchJson` is used for every portal endpoint so error shapes
+  and auth headers stay consistent.
+
+---
 
 ## Database Schema
 
 Supabase stores:
-- User profiles (personality traits, preferences, roles)
-- Conversations (session history)
-- Messages (individual chat messages)
-- Therapist profiles and verification records
-- Patient-therapist links (with consent tracking)
-- Clinical notes, treatment plans, homework assignments
-- Crisis events and emergency contacts
-- Reports, feedback, announcements, audit logs
+
+- `user_profiles` (personality traits, preferences, roles).
+- `conversations` (session history).
+- `messages` (individual chat messages).
+- `therapist_profiles` and verification records.
+- `patient_therapist_links` (status + `consent_scope` JSON).
+- `clinical_notes`, `treatment_plans`, `patient_homework`.
+- `secure_messages` (therapist ↔ patient threads).
+- `crisis_events`, `crisis_countdowns`, `crisis_safety_settings`,
+  `emergency_contacts`.
+- `clinical_access_logs` — every therapist read of patient data; surfaced
+  to the patient at `/my-therapists/access-log`.
+- `reports`, `feedback`, `announcements`, `audit_logs`.
+
+Performance indexes live in
+`supabase/migrations/20260417050000_performance_indexes.sql`. When adding
+indexes here, double-check the column names exist on the target tables
+(`conversations.started_at`, `clinical_access_logs.created_at`, etc.).

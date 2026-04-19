@@ -391,17 +391,31 @@ Conversation history (most recent last):
 LATEST message to classify: {text}
 
 IMPORTANT: Evaluate the latest message in the CONTEXT of the full conversation.
-A message like "goodbye" or "this is it" or "it feels like freedom" may be benign
-on its own but extremely dangerous after expressions of suicidal ideation. Look for
-escalation patterns: increasing hopelessness, farewell language, sense of calm after
-expressing intent to die (resolved intent is HIGH risk).
+A message like "goodbye", "this is it", "ok thanks", "nvm", "i'm fine now", or
+"it feels like freedom" may be benign on its own but extremely dangerous after
+expressions of suicidal ideation. Look for escalation patterns: increasing
+hopelessness, farewell language, sense of calm after expressing intent to die.
+
+ESCALATION DETECTION RULES:
+1. If history contains prior ideation cues (hopelessness, goodbye, plan-making,
+   "can't go on", method talk) AND the latest message is short, resigned, or
+   eerily calm ("ok", "nvm", "thanks for everything", "goodbye", "i get it now",
+   "i feel better") — set escalating=true and classification intent=true.
+   Calm resignation AFTER prior ideation is a severity signal, not reassurance.
+2. If history shows progression (mild sadness → hopelessness → plan/method talk)
+   across recent turns — set escalating=true even if the latest message is mild.
+3. A sudden shift to peace/acceptance after deep distress ("it'll all be over
+   soon", "i know what i need to do now") is a HIGH-imminence escalation signal.
+4. Resume-of-topic: if the user previously mentioned a method (pills, bridge,
+   gun, rope) and returns to it casually in the latest message, that is intent
+   even if phrased indirectly.
 
 Return strict JSON with these keys:
 - intent: boolean — true if, IN CONTEXT, the speaker is expressing or continuing first-person intent/desire to harm themselves
 - imminence: one of "none", "low", "medium", "high"
 - is_hyperbole: boolean — true only if clearly figurative
 - is_third_party: boolean — true if about someone else
-- escalating: boolean — true if the conversation shows a worsening trajectory toward self-harm
+- escalating: boolean — true if the conversation shows a worsening trajectory OR calm resignation following prior ideation
 - reasoning: one short sentence
 
 Respond with JSON only."""
@@ -489,133 +503,194 @@ def llm_arbitrate(
         return {"available": False, "reason": str(exc)[:200]}
 
 
+_ROBERTA_GATE = 0.35  # below this, RoBERTa alone does not justify calling the LLM
+_ROBERTA_MID = 0.60
+_ROBERTA_HIGH = 0.85
+
+
+def _bump_one_tier(level: RiskLevel) -> RiskLevel:
+    order = [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
+    idx = order.index(level)
+    return order[min(idx + 1, len(order) - 1)]
+
+
 def detect_crisis(
     text: str,
     *,
     use_llm: bool = True,
     history: Optional[List[Dict[str, str]]] = None,
+    session_has_prior_risk: bool = False,
+    roberta_score: Optional[float] = None,
     arbiter_timeout: float = 8.0,
 ) -> CrisisResult:
-    """Run the full two-stage pipeline on a single user message.
+    """Run the three-stage pipeline on a single user message.
 
-    Logic:
-      - Keyword CRITICAL → always CRITICAL (LLM can downgrade only via explicit
-        hyperbole/third-party verdict; otherwise stays CRITICAL).
-      - Keyword HIGH  → LLM confirms intent → CRITICAL, else HIGH.
-      - Keyword MEDIUM→ LLM confirms intent → HIGH, else MEDIUM.
-      - Keyword none + no history → LOW (skip LLM).
-      - Keyword none + history provided → run LLM with context to catch gradual
-        escalation patterns that have no explicit keywords.
-      - LLM unreachable → honor keyword tier as-is (never downgrade CRITICAL
-                          when LLM can't speak).
+    Stages:
+      1. keyword_scan  — <10ms regex tiers.
+      2. RoBERTa       — suicide-class probability (computed if not passed in).
+      3. LLM arbiter   — called only when (keyword != none) OR (roberta >= 0.35)
+                         OR (session_has_prior_risk). Uses the context-aware
+                         template when history is provided.
+
+    Fusion rules are ported from test_crisis_flow.py where the flow hit F1 0.78
+    on 132 labeled real messages.
+
+    session_has_prior_risk lifts the fast-exit for follow-up messages in a
+    conversation that already fired HIGH/CRITICAL — plugs the escalation FN
+    gap (6 of 8 FNs were fast-exits on calm resignation after prior ideation).
     """
     started = time.perf_counter()
     stage1 = keyword_scan(text)
     tier = stage1["tier"]
     matches = stage1["matches"]
 
-    # Short-circuit: no keyword hit AND no conversation history → LOW.
-    if tier == "none" and not history:
-        return CrisisResult(
-            risk_level=RiskLevel.LOW,
-            severity_score=0.0,
-            keyword_matches=[],
-            keyword_tier="none",
-            detection_ms=(time.perf_counter() - started) * 1000.0,
-        )
+    # --- Stage 1.5: RoBERTa (optional; caller may pre-compute) ----------------
+    # When the caller disables the LLM entirely (`use_llm=False` — e.g. unit
+    # tests or keyword-only mode) we also skip RoBERTa so the result reflects
+    # keyword-layer behavior only. RoBERTa without an LLM arbiter produces too
+    # many false positives on benign phrases like "goodbye ella".
+    if not use_llm and roberta_score is None:
+        rob = 0.0
+    elif roberta_score is None:
+        try:
+            from crisis import roberta_client
+            rob = roberta_client.score(text)
+        except Exception as exc:
+            logger.warning(f"RoBERTa score lookup failed: {exc}")
+            rob = 0.0
+    else:
+        rob = float(roberta_score)
 
+    # --- Gate: skip LLM entirely when nothing meaningful triggered ------------
+    needs_llm = (
+        use_llm
+        and (tier != "none" or rob >= _ROBERTA_GATE or session_has_prior_risk)
+    )
     llm: Dict[str, Any] = {"available": False}
-    if use_llm:
+    if needs_llm:
         llm = llm_arbitrate(text, history=history, timeout_seconds=arbiter_timeout)
 
-    # --- No keyword hit but history provided: LLM-only evaluation -------------
-    if tier == "none":
-        if llm.get("available"):
-            if llm.get("intent") and llm.get("imminence") in ("medium", "high"):
-                final = RiskLevel.CRITICAL
-                score = 0.9
-                verdict = "context_escalation"
-            elif llm.get("intent") or llm.get("escalating"):
-                final = RiskLevel.HIGH
-                score = 0.7
-                verdict = "context_escalation"
-            else:
-                final = RiskLevel.LOW
-                score = 0.1
-                verdict = "context_safe"
-        else:
-            final = RiskLevel.LOW
-            score = 0.0
-            verdict = "unavailable"
-        return CrisisResult(
-            risk_level=final,
-            severity_score=score,
-            keyword_matches=[],
-            ml_scores=llm,
-            keyword_tier="none",
-            llm_verdict=verdict,
-            detection_ms=(time.perf_counter() - started) * 1000.0,
-        )
+    llm_ok = bool(llm.get("available"))
+    intent = bool(llm.get("intent")) if llm_ok else False
+    hyperbole = bool(llm.get("is_hyperbole")) if llm_ok else False
+    third = bool(llm.get("is_third_party")) if llm_ok else False
+    escalating = bool(llm.get("escalating")) if llm_ok else False
+    imminence = str(llm.get("imminence", "none")).lower() if llm_ok else "none"
+    high_imminence = imminence in ("medium", "high")
 
-    # --- Keyword hit: resolve final tier using keyword + LLM ------------------
-    final = RiskLevel.MEDIUM
-    score = 0.4
-    verdict = "unavailable"
+    final, score, verdict = _fuse(
+        tier=tier,
+        rob=rob,
+        llm_ok=llm_ok,
+        intent=intent,
+        hyperbole=hyperbole,
+        third=third,
+        escalating=escalating,
+        high_imminence=high_imminence,
+        session_has_prior_risk=session_has_prior_risk,
+    )
 
-    if tier == "critical":
-        final = RiskLevel.CRITICAL
-        score = 1.0
-        if llm.get("available"):
-            if (llm.get("is_hyperbole") or llm.get("is_third_party")) and not llm.get("intent"):
-                final = RiskLevel.HIGH
-                score = 0.75
-                verdict = "hyperbole"
-            else:
-                verdict = "intent"
-    elif tier == "high":
-        if llm.get("available"):
-            if llm.get("intent") and llm.get("imminence") in ("medium", "high"):
-                final = RiskLevel.CRITICAL
-                score = 0.95
-                verdict = "intent"
-            elif llm.get("is_hyperbole") or llm.get("is_third_party"):
-                final = RiskLevel.MEDIUM
-                score = 0.35
-                verdict = "hyperbole"
-            else:
-                final = RiskLevel.HIGH
-                score = 0.7
-                verdict = "intent"
-        else:
-            final = RiskLevel.HIGH
-            score = 0.7
-    elif tier == "medium":
-        if llm.get("available"):
-            if llm.get("intent") and llm.get("imminence") in ("medium", "high"):
-                final = RiskLevel.HIGH
-                score = 0.65
-                verdict = "intent"
-            elif llm.get("is_hyperbole") or llm.get("is_third_party"):
-                final = RiskLevel.LOW
-                score = 0.1
-                verdict = "hyperbole"
-            else:
-                final = RiskLevel.MEDIUM
-                score = 0.45
-                verdict = "intent"
-        else:
-            final = RiskLevel.MEDIUM
-            score = 0.45
+    ml_scores: Dict[str, Any] = {"roberta_suicide": rob}
+    if llm_ok:
+        ml_scores["llm"] = {
+            "intent": intent,
+            "imminence": imminence,
+            "is_hyperbole": hyperbole,
+            "is_third_party": third,
+            "escalating": escalating,
+            "reasoning": llm.get("reasoning"),
+        }
+    elif needs_llm:
+        ml_scores["llm"] = {"available": False, "reason": llm.get("reason")}
 
     return CrisisResult(
         risk_level=final,
         severity_score=score,
         keyword_matches=matches,
-        ml_scores=llm,
+        ml_scores=ml_scores,
         keyword_tier=tier,
         llm_verdict=verdict,
         detection_ms=(time.perf_counter() - started) * 1000.0,
     )
+
+
+def _fuse(
+    *,
+    tier: str,
+    rob: float,
+    llm_ok: bool,
+    intent: bool,
+    hyperbole: bool,
+    third: bool,
+    escalating: bool,
+    high_imminence: bool,
+    session_has_prior_risk: bool,
+) -> tuple[RiskLevel, float, str]:
+    """Fusion rule table ported from test_crisis_flow.py.
+
+    Returns (risk_level, severity_score, verdict_tag).
+    """
+    # ---- Keyword CRITICAL ----------------------------------------------------
+    if tier == "critical":
+        if llm_ok and (hyperbole or third) and not intent:
+            return RiskLevel.HIGH, 0.75, "kw_critical_downgraded_hyperbole"
+        verdict = "kw_critical_confirmed" if llm_ok else "kw_critical_llm_unavailable"
+        return RiskLevel.CRITICAL, 1.0, verdict
+
+    # ---- Keyword HIGH --------------------------------------------------------
+    if tier == "high":
+        if llm_ok and intent and high_imminence:
+            return RiskLevel.CRITICAL, 0.95, "kw_high_plus_imminent_intent"
+        if llm_ok and (hyperbole or third) and not intent:
+            return RiskLevel.MEDIUM, 0.35, "kw_high_downgraded_hyperbole"
+        if rob >= _ROBERTA_MID:
+            if llm_ok and intent:
+                return RiskLevel.CRITICAL, 0.9, "kw_high_roberta_mid_intent"
+            return RiskLevel.HIGH, 0.75, "kw_high_roberta_mid"
+        return RiskLevel.HIGH, 0.7, "kw_high"
+
+    # ---- Keyword MEDIUM ------------------------------------------------------
+    if tier == "medium":
+        if llm_ok and intent and high_imminence:
+            return RiskLevel.HIGH, 0.65, "kw_medium_plus_imminent_intent"
+        if llm_ok and (hyperbole or third) and not intent:
+            return RiskLevel.LOW, 0.1, "kw_medium_downgraded_hyperbole"
+        if rob >= _ROBERTA_HIGH:
+            return RiskLevel.HIGH, 0.6, "kw_medium_roberta_high"
+        if rob >= _ROBERTA_MID:
+            return RiskLevel.MEDIUM, 0.5, "kw_medium_roberta_mid"
+        return RiskLevel.MEDIUM, 0.45, "kw_medium"
+
+    # ---- Keyword NONE: RoBERTa-led + sticky session elevation ---------------
+    # Sticky elevation: prior HIGH/CRITICAL in this conversation + LLM says
+    # escalating/intent → do not fast-exit. This closes the calm-resignation
+    # FN gap measured on data.txt.
+    if session_has_prior_risk and llm_ok and (intent or escalating):
+        level = RiskLevel.CRITICAL if (intent and high_imminence) else RiskLevel.HIGH
+        return level, 0.85, "session_escalation"
+
+    if rob >= _ROBERTA_HIGH:
+        if llm_ok and intent:
+            return RiskLevel.CRITICAL, 0.9, "roberta_high_intent"
+        if llm_ok and (hyperbole or third):
+            return RiskLevel.LOW, 0.1, "roberta_high_but_hyperbole"
+        return RiskLevel.HIGH, 0.7, "roberta_high_no_llm"
+
+    if rob >= _ROBERTA_MID:
+        if llm_ok and intent:
+            return RiskLevel.HIGH, 0.65, "roberta_mid_intent"
+        return RiskLevel.MEDIUM, 0.45, "roberta_mid"
+
+    if rob >= _ROBERTA_GATE:
+        if llm_ok and intent and high_imminence:
+            return RiskLevel.HIGH, 0.6, "roberta_gate_imminent"
+        if llm_ok and intent:
+            return RiskLevel.MEDIUM, 0.4, "roberta_gate_intent"
+        return RiskLevel.LOW, 0.15, "roberta_gate_no_intent"
+
+    # kw=none, rob<0.35, no prior risk → LOW (fast-exit path; FN-safe due to
+    # sticky elevation above).
+    return RiskLevel.LOW, 0.0, "fast_exit"
 
 
 # =============================================================================

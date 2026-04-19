@@ -691,8 +691,11 @@ export default function Landing() {
               <Wind className="absolute text-primary/40 animate-pulse" size={32} strokeWidth={1.5} />
               <Sparkles className="absolute text-accent/60 -top-1 -right-1 animate-bounce" size={16} />
             </div>
-            <span className="text-2xl font-light tracking-[0.25em] uppercase">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+            <span className="flex flex-col leading-tight">
+              <span className="text-2xl font-light tracking-[0.25em] uppercase">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+              </span>
+              <span className="text-[9px] uppercase tracking-[0.35em] text-muted-foreground/70">by 3AM Talks</span>
             </span>
           </div>
           <div className="flex gap-2">
@@ -714,7 +717,7 @@ export default function Landing() {
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-primary">
                   <Sparkles className="h-5 w-5" />
-                  <span className="text-sm font-medium">AI-Powered Mental Wellness</span>
+                  <span className="text-sm font-medium">3AM Talks · AI Mental Health Assistant</span>
                 </div>
                 <h1 className="text-5xl md:text-7xl font-extralight leading-tight tracking-tight uppercase">
                   Your Personal{" "}
@@ -801,7 +804,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="border-t py-8 px-4">
         <div className="container mx-auto text-center text-muted-foreground">
-          <p>&copy; 2024 AI Therapy Assistant. Your mental wellness companion.</p>
+          <p>&copy; 2026 3AM Talks · Ella AI — AI Mental Health Assistant.</p>
         </div>
       </footer>
     </div>

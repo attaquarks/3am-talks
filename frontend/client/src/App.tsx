@@ -24,6 +24,8 @@ import TherapistProfile from "./pages/TherapistProfile";
 import TherapistMessages from "./pages/TherapistMessages";
 import PatientView from "./pages/PatientView";
 import MyTherapists from "./pages/MyTherapists";
+import PatientMessages from "./pages/PatientMessages";
+import PatientAccessLog from "./pages/PatientAccessLog";
 import InviteAccept from "./pages/InviteAccept";
 import Safety from "./pages/Safety";
 
@@ -60,6 +62,8 @@ function App() {
                 <Route path="/history" element={<History />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/my-therapists" element={<MyTherapists />} />
+                <Route path="/my-therapists/messages" element={<PatientMessages />} />
+                <Route path="/my-therapists/access-log" element={<PatientAccessLog />} />
                 <Route path="/safety" element={<Safety />} />
 
                 {/* Admin */}

@@ -200,9 +200,9 @@ export default function PersonalityTraits({ profile, loading }: PersonalityTrait
         )}
       </div>
 
-      {/* Traits List */}
-      <div className="space-y-4">
-        {traitConfigs.map((config) => {
+      {/* Traits List — 2×2 grid with Neuroticism centered below */}
+      {(() => {
+        const renderTrait = (config: TraitConfig) => {
           const value = traits[config.key];
           const percentage = Math.round(value * 100);
           const colors = colorClasses[config.color];
@@ -250,8 +250,24 @@ export default function PersonalityTraits({ profile, loading }: PersonalityTrait
               )}
             </div>
           );
-        })}
-      </div>
+        };
+
+        const topFour = traitConfigs.filter(c => c.key !== 'neuroticism');
+        const neuroticism = traitConfigs.find(c => c.key === 'neuroticism');
+
+        return (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
+              {topFour.map(renderTrait)}
+            </div>
+            {neuroticism && (
+              <div className="sm:max-w-md sm:mx-auto sm:pt-2">
+                {renderTrait(neuroticism)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Personality Summary Card */}
       {hasPersonalityData && (

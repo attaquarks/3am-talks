@@ -58,11 +58,16 @@ export function AuthWrapper({ children }: AuthWrapperProps) {
     }
 
     const patientOnlyPaths = ['/dashboard', '/chat', '/therapist', '/history', '/profile', '/my-therapists'];
-    if (role === 'admin' && patientOnlyPaths.includes(location.pathname)) {
+    const onPatientPath = patientOnlyPaths.some(
+      (p) => location.pathname === p || location.pathname.startsWith(p + '/'),
+    );
+    if (role === 'admin' && onPatientPath) {
       navigate('/admin');
+      return;
     }
-    if (role === 'therapist' && patientOnlyPaths.includes(location.pathname)) {
+    if (role === 'therapist' && onPatientPath) {
       navigate('/therapist-portal');
+      return;
     }
   }, [user, loading, navigate, location.pathname]);
 

@@ -18,9 +18,12 @@ from core.helpers import (
     _get_profile_persistent,
     _resume_or_start_conversation,
 )
+from crisis.integration import process_message_with_crisis
+from database.supabase_client import SupabaseClient
 
 logger = logging.getLogger("3am-voice")
 router = APIRouter()
+_sb = SupabaseClient()
 
 class VoiceBootstrapRequest(BaseModel):
     user_id: str
@@ -103,11 +106,15 @@ def voice_bootstrap(body: VoiceBootstrapRequest, request: Request):
 
 
 @router.post("/api/voice/chat")
-def voice_chat(body: VoiceChatRequest, request: Request):
+async def voice_chat(body: VoiceChatRequest, request: Request):
     """
     Server-to-server endpoint used by the LiveKit voice agent.
     Routes the message through the full ConversationManager pipeline so voice
     shares the exact same persona, memory, RAG, and personality adaptation.
+
+    Crisis detection runs in parallel with the therapy LLM. When HIGH/CRITICAL,
+    the response contains a `crisis` field; the voice agent forwards it as a
+    LiveKit data-channel event so the frontend modal can open alongside TTS.
     """
     require_voice_agent(request)
     mgr = get_manager()
@@ -115,17 +122,21 @@ def voice_chat(body: VoiceChatRequest, request: Request):
     _get_profile_persistent(body.user_id)
     conv_id = body.conversation_id or _resume_or_start_conversation(mgr, body.user_id)
 
-    result = mgr.process_message(
+    result, crisis_payload = await process_message_with_crisis(
+        mgr=mgr,
+        sb=_sb,
         user_id=body.user_id,
         conversation_id=conv_id,
-        user_message=body.message,
-        is_questionnaire_response=False,
+        message=body.message,
     )
 
-    return {
+    response = {
         "conversation_id": conv_id,
         "response": result.get("response", "I'm here to listen."),
         "turn": result.get("turn"),
         "personality_scores": result.get("personality_scores"),
         "rag_techniques_used": result.get("rag_techniques_used", 0),
     }
+    if crisis_payload:
+        response["crisis"] = crisis_payload
+    return response

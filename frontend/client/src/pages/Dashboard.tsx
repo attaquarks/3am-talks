@@ -32,9 +32,46 @@ type MoodEntry = {
   updated_at?: string;
 };
 
+const WELCOME_GREETINGS = [
+  "Welcome back",
+  "Good to see you again",
+  "Hey there, glad you're here",
+  "You made it back",
+  "Always nice to see you",
+  "Look who's here",
+  "Welcome home",
+  "Hi there, sunshine",
+  "The light was on for you",
+  "Back for a bit? Perfect",
+  "You showed up — that counts",
+  "Warm welcome back",
+  "Pull up a chair",
+  "You, again — lovely",
+  "Glad you dropped in",
+];
+
+const WELCOME_SUBLINES = [
+  "Ready to continue your mental health journey?",
+  "What's on your mind today?",
+  "Take a breath. You've got this.",
+  "No pressure — go at your own pace.",
+  "A small step today still counts.",
+  "ELLA's here whenever you're ready.",
+  "How's your heart doing today?",
+  "Let's make today a little lighter.",
+  "Small check-ins, big difference.",
+  "You're exactly where you need to be.",
+];
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [greeting] = useState(() => pickRandom(WELCOME_GREETINGS));
+  const [subline] = useState(() => pickRandom(WELCOME_SUBLINES));
   const { profile, loading: profileLoading } = useProfile();
   // using createMoodEntry from hook
   const { moodEntries, loading: moodLoading, createMoodEntry } = useMoodEntries();
@@ -291,62 +328,78 @@ export default function Dashboard() {
   ].filter(Boolean);
 
   return (
-    <div className="h-screen relative flex flex-col bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30 overflow-hidden">
+    <div className="min-h-screen relative bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30">
       <BackgroundDecor />
       <Navigation />
-      <main className="flex-1 min-h-0 overflow-y-auto container relative z-10 mx-auto px-4 py-4 pb-20 md:pb-4">
-        {/* Welcome Section */}
-        <div className="mb-4 animate-fade-in-up">
-          <h1 className="text-2xl font-bold text-foreground mb-1">
-            Welcome back, {profileLoading ? '...' : (profile?.name || 'User')} 👋
+      <main className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-10 py-6 pb-24 max-w-7xl">
+        {/* Welcome */}
+        <div className="text-center mb-6 animate-fade-in-up">
+          <h1 className="text-2xl md:text-3xl font-light tracking-tight text-foreground mb-1">
+            {greeting}, {profileLoading ? '...' : (profile?.name || 'User')} 👋
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Ready to continue your mental health journey?
-          </p>
+          <p className="text-sm text-muted-foreground">{subline}</p>
         </div>
 
+        {/* Live stats strip */}
+        {!statsLoading && stats && (
+          <div className="grid grid-cols-3 gap-4 md:gap-6 mb-6 max-w-3xl mx-auto animate-fade-in-up delay-75">
+            <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">🌟 {stats.current_streak}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Streak</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">📊 {stats.mood_improvement_percentage}%</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Improvement</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">💝 {stats.total_sessions}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Sessions</div>
+            </div>
+          </div>
+        )}
+
         {/* Quick Actions */}
-        <div className="grid md:grid-cols-3 gap-3 mb-4 animate-fade-in-up delay-100">
-          <Link to="/therapist">
-            <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300">
-              <CardContent className="p-6">
+        <div className="grid sm:grid-cols-3 gap-3 mb-6 animate-fade-in-up delay-100">
+          <Link to="/therapist" className="block">
+            <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full">
+              <CardContent className="p-5">
                 <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-gradient-primary rounded-xl flex items-center justify-center group-hover:animate-float">
-                    <MessageCircle className="h-6 w-6 text-white" />
+                  <div className="w-11 h-11 bg-gradient-primary rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
+                    <MessageCircle className="h-5 w-5 text-white" />
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">Start Conversation</h3>
-                    <p className="text-sm text-muted-foreground">Talk to ELLA now</p>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-foreground text-sm">Start Conversation</h3>
+                    <p className="text-xs text-muted-foreground">Talk to ELLA now</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </Link>
 
-          <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300" onClick={() => setShowMoodJournal(true)}>
-            <CardContent className="p-6">
+          <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full" onClick={() => setShowMoodJournal(true)}>
+            <CardContent className="p-5">
               <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 bg-secondary rounded-xl flex items-center justify-center group-hover:animate-float">
-                  <BookOpen className="h-6 w-6 text-white" />
+                <div className="w-11 h-11 bg-secondary rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
+                  <BookOpen className="h-5 w-5 text-white" />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-foreground">Mood Journal</h3>
-                  <p className="text-sm text-muted-foreground">Log your feelings</p>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-foreground text-sm">Mood Journal</h3>
+                  <p className="text-xs text-muted-foreground">Log your feelings</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Link to="/history">
-            <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300">
-              <CardContent className="p-6">
+          <Link to="/history" className="block">
+            <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full">
+              <CardContent className="p-5">
                 <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center group-hover:animate-float">
-                    <TrendingUp className="h-6 w-6 text-white" />
+                  <div className="w-11 h-11 bg-accent rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
+                    <TrendingUp className="h-5 w-5 text-white" />
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-foreground">Insights</h3>
-                    <p className="text-sm text-muted-foreground">View your progress</p>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-foreground text-sm">Insights</h3>
+                    <p className="text-xs text-muted-foreground">View your progress</p>
                   </div>
                 </div>
               </CardContent>
@@ -354,127 +407,103 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-3 mb-4">
-          {/* Mood Calendar */}
-          <Card className="animate-fade-in-up delay-200">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center space-x-2 text-base">
+        {/* Main content: 2-up on md+, stacked on mobile */}
+        <div className="grid md:grid-cols-2 gap-5 mb-6 animate-fade-in-up delay-200">
+          {/* Mood — check-in + recent entries combined */}
+          <Card className="h-full flex flex-col">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
                 <CalendarIcon className="h-4 w-4 text-primary" />
-                <span>This Month's Journey</span>
+                <span>Your Mood</span>
               </CardTitle>
+              <CardDescription className="text-xs">
+                {hasLoggedToday ? "Logged for today — nice work." : "A 30-second check-in, then your recent entries."}
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-40 overflow-y-auto">
-                {moodLoading ? (
-                  <div className="text-center py-2 text-muted-foreground text-sm">Loading...</div>
-                ) : moodEntries.length === 0 ? (
-                  <div className="text-center py-2 text-muted-foreground text-sm">No mood entries yet</div>
-                ) : (
-                  moodEntries.slice(0, 5).map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex items-center justify-between p-2 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center space-x-2">
+            <CardContent className="flex-1 flex flex-col gap-4">
+              {/* Check-in CTA */}
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/60">
+                <div className="w-12 h-12 bg-gradient-hero rounded-full flex items-center justify-center shrink-0 animate-pulse-soft">
+                  <MessageCircle className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">
+                    {hasLoggedToday ? "See you tomorrow" : "How are you feeling today?"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {hasLoggedToday ? "Come back for tomorrow's log." : "Quick mood + reflection."}
+                  </p>
+                </div>
+                <Button
+                  variant="hero"
+                  size="sm"
+                  onClick={() => setShowCheckinModal(true)}
+                  disabled={hasLoggedToday}
+                  className="shrink-0"
+                >
+                  {hasLoggedToday ? "Done" : "Check-in"}
+                </Button>
+              </div>
+
+              {/* Recent entries */}
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent entries</p>
+                  {moodEntries.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground">{moodEntries.length} total</span>
+                  )}
+                </div>
+                <div className="space-y-2 flex-1">
+                  {moodLoading ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
+                  ) : moodEntries.length === 0 ? (
+                    <div className="text-center py-6 text-muted-foreground text-sm">
+                      No entries yet — your first check-in starts the streak.
+                    </div>
+                  ) : (
+                    moodEntries.slice(0, 4).map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex items-center gap-3 p-2.5 rounded-xl border border-border hover:bg-muted/40 transition-colors"
+                      >
                         {getMoodIcon(entry.mood)}
-                        <div>
-                          <p className="text-sm font-medium text-foreground">
-                            {new Date(entry.date).toLocaleDateString()}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground">
+                            {new Date(entry.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
                           </p>
-                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{entry.note || 'No note'}</p>
+                          <p className="text-xs text-muted-foreground truncate">{entry.note || 'No note'}</p>
                         </div>
                       </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
+                <Button variant="outline" size="sm" className="w-full mt-3" onClick={() => setShowFullCalendar(true)}>
+                  <CalendarIcon className="mr-2 h-3 w-3" />
+                  View full calendar
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="w-full mt-2" onClick={() => setShowFullCalendar(true)}>
-                <CalendarIcon className="mr-2 h-3 w-3" />
-                View Full Calendar
-              </Button>
             </CardContent>
           </Card>
 
           {/* Personality Traits */}
-          <Card className="animate-fade-in-up delay-300">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Brain className="h-5 w-5 text-primary" />
-                <span>Your Personality Profile</span>
+          <Card className="h-full flex flex-col">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Brain className="h-4 w-4 text-primary" />
+                <span>Personality Profile</span>
               </CardTitle>
-              <CardDescription>
-                Big Five personality traits based on your conversations with ELLA
-              </CardDescription>
+              <CardDescription className="text-xs">Big Five traits from your ELLA sessions</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1">
               <PersonalityTraits profile={profile} loading={profileLoading} />
             </CardContent>
           </Card>
-
-          {/* Today's Check-in */}
-          <Card className="animate-fade-in-up delay-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Today's Check-in</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-4">
-                <div className="w-14 h-14 bg-gradient-hero rounded-full flex items-center justify-center mx-auto mb-3 animate-pulse-soft">
-                  <MessageCircle className="h-6 w-6 text-primary" />
-                </div>
-                <Button variant="hero" className="w-full mb-3" onClick={() => setShowCheckinModal(true)}>
-                  Quick Check-in
-                </Button>
-              </div>
-              <div className="border-t border-border pt-3">
-                <h4 className="font-medium text-foreground mb-1 text-sm">Recent Activity</h4>
-                <div className="space-y-1">
-                  {statsLoading ? (
-                    <p className="text-xs text-muted-foreground">Loading...</p>
-                  ) : stats ? (
-                    <>
-                      <p className="text-xs text-muted-foreground">{stats.current_streak} days streak · {stats.total_sessions} sessions</p>
-                      <p className="text-xs text-muted-foreground">Mood improved {stats.mood_improvement_percentage}% this week</p>
-                    </>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No activity data yet</p>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Stats Row */}
-        <div className="mt-6">
-          <Card className="animate-fade-in-up delay-400">
-            <CardContent className="p-4">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                {statsLoading ? (
-                  <p className="text-sm text-muted-foreground col-span-3">Loading stats...</p>
-                ) : stats ? (
-                  <>
-                    <div>
-                      <div className="text-2xl font-bold text-primary">🌟 {stats.current_streak}</div>
-                      <div className="text-xs text-muted-foreground">Day Streak</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-primary">📊 {stats.mood_improvement_percentage}%</div>
-                      <div className="text-xs text-muted-foreground">Mood Improvement</div>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-primary">💝 {stats.total_sessions}</div>
-                      <div className="text-xs text-muted-foreground">Total Sessions</div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground col-span-3">No activity data yet</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+        {/* Homework — full width, integrated */}
+        <div className="animate-fade-in-up delay-300">
+          <HomeworkCard />
         </div>
-
-        <HomeworkCard />
       </main>
 
       <Dialog open={showMoodJournal} onOpenChange={setShowMoodJournal}>

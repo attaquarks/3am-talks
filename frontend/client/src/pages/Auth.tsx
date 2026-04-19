@@ -31,8 +31,11 @@ const Auth: React.FC = () => {
             <Wind className="absolute text-primary/40 group-hover:rotate-12 transition-all" size={38} strokeWidth={1.5} />
             <Sparkles className="absolute text-accent/60 -top-1 -right-1 animate-pulse" size={18} />
           </div>
-          <span className="text-3xl font-light tracking-[0.2em] uppercase">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+          <span className="flex flex-col leading-tight">
+            <span className="text-3xl font-light tracking-[0.2em] uppercase">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+            </span>
+            <span className="text-[9px] uppercase tracking-[0.35em] text-muted-foreground/70 mt-1">by 3AM Talks</span>
           </span>
         </div>
 
@@ -183,7 +186,7 @@ const Auth: React.FC = () => {
       >
         <div className="max-w-7xl mx-auto flex flex-col items-center">
           <p className="text-foreground/40 text-[9px] font-bold uppercase tracking-[0.5em] text-center">
-            © 2024 ELLA AI. COMPASSION ENGINEERED.
+            © 2026 3AM TALKS · ELLA AI · AI MENTAL HEALTH ASSISTANT
           </p>
         </div>
       </motion.footer>

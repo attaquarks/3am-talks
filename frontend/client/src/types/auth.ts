@@ -170,6 +170,11 @@ export interface CrisisEvent {
     therapist_id?: string;
     triggered_by: string;
     severity: 'low' | 'medium' | 'high' | 'critical';
+    severity_score?: number;
+    trigger_text?: string | null;
+    keyword_matches?: string[];
+    intervention_type?: string;
+    session_id?: string | null;
     context?: Record<string, unknown>;
     escalated_at?: string;
     resolved_at?: string | null;

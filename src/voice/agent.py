@@ -6,11 +6,21 @@ Real-time voice conversation agent using:
 Runs as a standalone process: python src/voice_agent.py dev
 """
 
+import json
 import logging
 from dotenv import load_dotenv
 import os
+import sys
 import asyncio
+from pathlib import Path
 from typing import AsyncIterable, Optional
+
+# When launched as `python src/voice/agent.py dev`, Python puts src/voice/ on
+# sys.path instead of src/, so `from voice.tts_plugin` can't resolve. Add src/
+# to sys.path so the import works regardless of invocation style.
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 from livekit import rtc
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, llm
@@ -50,12 +60,14 @@ class Ella(Agent):
         voice_agent_secret: str,
         user_id: str,
         conversation_id: str,
+        room: Optional[rtc.Room] = None,
     ) -> None:
         super().__init__(instructions=ELLA_SYSTEM_PROMPT)
         self._backend_base_url = backend_base_url.rstrip("/")
         self._voice_agent_secret = voice_agent_secret
         self._user_id = user_id
         self._conversation_id = conversation_id
+        self._room = room
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=180.0, write=10.0, pool=10.0)
         )
@@ -113,6 +125,11 @@ class Ella(Agent):
             data = resp.json()
 
             self._conversation_id = data.get("conversation_id") or self._conversation_id
+
+            crisis = data.get("crisis")
+            if crisis and crisis.get("detected"):
+                await self._publish_crisis(crisis)
+
             text = (data.get("response") or "").strip()
             logger.info(f"[llm_node] Got response text ({len(text)} chars): {text[:100]!r}")
             if not text:
@@ -122,6 +139,24 @@ class Ella(Agent):
         except Exception as e:
             logger.error(f"[llm_node] Backend voice/chat failed: {type(e).__name__}: {e}")
             raise
+
+    async def _publish_crisis(self, crisis: dict) -> None:
+        """Send a crisis event over the LiveKit data channel so the frontend
+        can open the same CrisisCountdownModal used by /api/chat."""
+        if not self._room or not getattr(self._room, "local_participant", None):
+            logger.warning("[crisis] no room/local_participant — cannot publish")
+            return
+        try:
+            payload = json.dumps({"type": "crisis.countdown.start", **crisis})
+            await self._room.local_participant.publish_data(
+                payload.encode("utf-8"), reliable=True
+            )
+            logger.info(
+                f"[crisis] published risk_level={crisis.get('risk_level')} "
+                f"event_id={crisis.get('event_id')}"
+            )
+        except Exception as exc:
+            logger.error(f"[crisis] publish_data failed: {exc}")
 
     async def on_exit(self) -> None:
         try:
@@ -229,6 +264,7 @@ async def entrypoint(ctx: JobContext) -> None:
             voice_agent_secret=voice_agent_secret,
             user_id=user_id,
             conversation_id=conversation_id,
+            room=ctx.room,
         ),
         room=ctx.room,
     )

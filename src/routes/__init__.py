@@ -8,7 +8,7 @@ from .chat import router as chat_router
 from .user import router as user_router
 from .admin import router as admin_router
 from .crisis import router as crisis_router
-from .therapist import router as therapist_router
+from .therapist import router as therapist_router, shared_router as therapist_shared_router
 from .voice import router as voice_router
 from .data import router as data_router
 
@@ -19,6 +19,7 @@ __all__ = [
     "admin_router",
     "crisis_router",
     "therapist_router",
+    "therapist_shared_router",
     "voice_router",
     "data_router",
 ]

@@ -18,25 +18,36 @@ interface VerificationInfo {
 }
 
 export default function TherapistPending() {
-    const { user, signOut } = useAuth();
+    const { user, refetchUser, signOut } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
     const [info, setInfo] = useState<VerificationInfo | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const run = async () => {
+        let cancelled = false;
+        const check = async () => {
             try {
                 const data = await therapistFetchJson<{ verification?: VerificationInfo }>("/api/therapist/me");
-                setInfo(data?.verification ?? { status: "pending" });
+                if (cancelled) return;
+                const next = data?.verification ?? { status: "pending" };
+                setInfo(next);
+                if (next.status === "approved") {
+                    if (refetchUser) await refetchUser();
+                    navigate("/therapist-portal");
+                }
             } catch (err: any) {
-                toast({ title: "Couldn't load status", description: err.message, variant: "destructive" });
+                if (!cancelled && loading) {
+                    toast({ title: "Couldn't load status", description: err.message, variant: "destructive" });
+                }
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
-        run();
-    }, [toast]);
+        check();
+        const id = window.setInterval(check, 30000);
+        return () => { cancelled = true; window.clearInterval(id); };
+    }, [toast, navigate, refetchUser, loading]);
 
     useEffect(() => {
         if (user?.account_status === "active" && user?.role === "therapist") {

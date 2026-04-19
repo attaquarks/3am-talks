@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from "@/components/auth/BackgroundDecor";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,68 +9,111 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { therapistFetchJson } from "@/lib/therapistFetch";
-import { CaseloadPatient, SecureMessage } from "@/types/auth";
+import { SecureMessage } from "@/types/auth";
 import { Inbox, Send, Loader2, MessageSquare } from "lucide-react";
+
+interface ThreadSummary {
+    link_id: string;
+    counterparty?: {
+        user_id?: string;
+        name?: string;
+        email?: string;
+        display_name?: string;
+        title?: string;
+    };
+    last_message?: SecureMessage | null;
+    unread_count?: number;
+}
 
 export default function TherapistMessages() {
     const { toast } = useToast();
     const { user } = useAuth();
-    const [caseload, setCaseload] = useState<CaseloadPatient[]>([]);
-    const [messages, setMessages] = useState<SecureMessage[]>([]);
-    const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
+
+    const [threads, setThreads] = useState<ThreadSummary[]>([]);
+    const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+    const [threadMessages, setThreadMessages] = useState<SecureMessage[]>([]);
     const [draft, setDraft] = useState("");
     const [urgency, setUrgency] = useState<"normal" | "priority" | "urgent">("normal");
     const [loading, setLoading] = useState(true);
+    const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
-    const load = useCallback(async () => {
-        setLoading(true);
+    const loadThreads = useCallback(async () => {
         try {
-            const [caseRes, msgRes] = await Promise.all([
-                therapistFetchJson<{ patients: CaseloadPatient[] }>("/api/therapist/patients"),
-                therapistFetchJson<{ messages: SecureMessage[] }>("/api/therapist/messages"),
-            ]);
-            setCaseload(caseRes.patients || []);
-            setMessages(msgRes.messages || []);
-            if (!selectedPatient && caseRes.patients && caseRes.patients[0]) {
-                setSelectedPatient(caseRes.patients[0].patient_id);
+            const res = await therapistFetchJson<{ threads: ThreadSummary[] }>("/api/therapist/messages");
+            setThreads(res.threads || []);
+            if (!selectedLinkId && res.threads && res.threads[0]) {
+                setSelectedLinkId(res.threads[0].link_id);
             }
         } catch (err: any) {
             toast({ title: "Couldn't load messages", description: err.message, variant: "destructive" });
         } finally {
             setLoading(false);
         }
-    }, [toast, selectedPatient]);
+    }, [toast, selectedLinkId]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => { loadThreads(); }, [loadThreads]);
 
-    const threadMessages = useMemo(() => {
-        if (!selectedPatient) return [];
-        return messages
-            .filter((m) => m.sender_id === selectedPatient || m.recipient_id === selectedPatient)
-            .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
-    }, [messages, selectedPatient]);
+    const loadThread = useCallback(async (linkId: string) => {
+        setThreadLoading(true);
+        try {
+            const data = await therapistFetchJson<{ messages: SecureMessage[] }>(
+                `/api/therapist/messages?link_id=${linkId}`
+            );
+            const msgs = data.messages || [];
+            setThreadMessages(msgs);
+
+            const unreadForMe = msgs.filter(
+                (m) => m.recipient_id === user?.id && !m.read_at
+            );
+            if (unreadForMe.length > 0) {
+                await Promise.all(
+                    unreadForMe.map((m) =>
+                        therapistFetchJson(`/api/therapist/messages/${m.message_id}/read`, { method: "POST" })
+                            .catch(() => undefined)
+                    )
+                );
+                setThreads((prev) => prev.map((t) => t.link_id === linkId ? { ...t, unread_count: 0 } : t));
+            }
+        } catch (err: any) {
+            toast({ title: "Couldn't open thread", description: err.message, variant: "destructive" });
+        } finally {
+            setThreadLoading(false);
+        }
+    }, [toast, user?.id]);
+
+    useEffect(() => {
+        if (selectedLinkId) loadThread(selectedLinkId);
+        else setThreadMessages([]);
+    }, [selectedLinkId, loadThread]);
+
+    useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, [threadMessages]);
 
     const sendMessage = async () => {
-        if (!selectedPatient || !draft.trim()) return;
+        if (!selectedLinkId || !draft.trim()) return;
         setSending(true);
         try {
             await therapistFetchJson("/api/therapist/messages", {
                 method: "POST",
-                body: JSON.stringify({
-                    recipient_id: selectedPatient,
-                    body: draft,
-                    urgency,
-                }),
+                body: JSON.stringify({ link_id: selectedLinkId, body: draft, urgency }),
             });
             setDraft("");
-            await load();
+            await Promise.all([loadThreads(), loadThread(selectedLinkId)]);
         } catch (err: any) {
             toast({ title: "Send failed", description: err.message, variant: "destructive" });
         } finally {
             setSending(false);
         }
     };
+
+    const selectedThread = threads.find((t) => t.link_id === selectedLinkId);
+    const counterpartyName = selectedThread?.counterparty?.display_name
+        || selectedThread?.counterparty?.name
+        || selectedThread?.counterparty?.email
+        || "Patient";
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/10 relative">
@@ -88,23 +131,24 @@ export default function TherapistMessages() {
                 ) : (
                     <div className="grid md:grid-cols-[320px_1fr] gap-4">
                         <Card className="rounded-3xl overflow-hidden">
-                            <CardHeader><CardTitle className="text-base">Patients</CardTitle></CardHeader>
+                            <CardHeader><CardTitle className="text-base">Conversations</CardTitle></CardHeader>
                             <CardContent className="p-0 max-h-[70vh] overflow-y-auto">
-                                {caseload.length === 0 ? (
-                                    <p className="text-center text-sm text-muted-foreground py-8 px-4">No linked patients yet.</p>
-                                ) : caseload.map((p) => {
-                                    const unread = messages.filter((m) => m.sender_id === p.patient_id && !m.read_at && m.recipient_id === user?.id).length;
+                                {threads.length === 0 ? (
+                                    <p className="text-center text-sm text-muted-foreground py-8 px-4">No active conversations. Link with a patient to start messaging.</p>
+                                ) : threads.map((t) => {
+                                    const name = t.counterparty?.display_name || t.counterparty?.name || t.counterparty?.email || "Patient";
+                                    const preview = t.last_message?.body ?? "—";
                                     return (
                                         <button
-                                            key={p.patient_id}
-                                            onClick={() => setSelectedPatient(p.patient_id)}
-                                            className={`w-full text-left px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors ${selectedPatient === p.patient_id ? "bg-primary/5" : ""}`}
+                                            key={t.link_id}
+                                            onClick={() => setSelectedLinkId(t.link_id)}
+                                            className={`w-full text-left px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted/40 transition-colors ${selectedLinkId === t.link_id ? "bg-primary/5" : ""}`}
                                         >
                                             <div className="flex items-center justify-between">
-                                                <p className="font-medium text-sm">{p.name || p.email || p.patient_id}</p>
-                                                {unread > 0 && <Badge className="h-5 px-1.5 text-[10px]">{unread}</Badge>}
+                                                <p className="font-medium text-sm truncate">{name}</p>
+                                                {(t.unread_count ?? 0) > 0 && <Badge className="h-5 px-1.5 text-[10px] shrink-0">{t.unread_count}</Badge>}
                                             </div>
-                                            <p className="text-xs text-muted-foreground">{p.email ?? ""}</p>
+                                            <p className="text-xs text-muted-foreground truncate">{preview}</p>
                                         </button>
                                     );
                                 })}
@@ -112,15 +156,15 @@ export default function TherapistMessages() {
                         </Card>
 
                         <Card className="rounded-3xl flex flex-col h-[70vh]">
-                            {selectedPatient ? (
+                            {selectedLinkId ? (
                                 <>
                                     <CardHeader className="border-b shrink-0">
-                                        <CardTitle className="text-base">
-                                            {caseload.find((p) => p.patient_id === selectedPatient)?.name || "Patient"}
-                                        </CardTitle>
+                                        <CardTitle className="text-base">{counterpartyName}</CardTitle>
                                     </CardHeader>
-                                    <CardContent className="flex-1 overflow-y-auto space-y-3 py-4">
-                                        {threadMessages.length === 0 ? (
+                                    <CardContent ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 py-4">
+                                        {threadLoading ? (
+                                            <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                                        ) : threadMessages.length === 0 ? (
                                             <p className="text-center text-sm text-muted-foreground py-12">No messages yet. Start the conversation.</p>
                                         ) : threadMessages.map((m) => {
                                             const mine = m.sender_id === user?.id;
@@ -128,7 +172,7 @@ export default function TherapistMessages() {
                                                 <div key={m.message_id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                                                     <div className={`max-w-[70%] rounded-2xl px-4 py-3 ${mine ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                                                         {m.is_system && <Badge variant="secondary" className="mb-1 text-[10px]">System</Badge>}
-                                                        {m.urgency !== "normal" && (
+                                                        {m.urgency && m.urgency !== "normal" && (
                                                             <Badge variant={m.urgency === "urgent" ? "destructive" : "default"} className="mb-1 text-[10px]">
                                                                 {m.urgency}
                                                             </Badge>
@@ -170,7 +214,7 @@ export default function TherapistMessages() {
                             ) : (
                                 <div className="flex flex-col items-center justify-center flex-1 text-muted-foreground">
                                     <MessageSquare className="h-10 w-10 mb-2 opacity-40" />
-                                    <p className="text-sm">Select a patient to view the thread.</p>
+                                    <p className="text-sm">Select a conversation to view the thread.</p>
                                 </div>
                             )}
                         </Card>

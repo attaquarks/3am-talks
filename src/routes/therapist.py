@@ -27,6 +27,7 @@ logger = logging.getLogger("therapist-routes")
 
 
 router = APIRouter(prefix="/api/therapist", tags=["therapist"])
+shared_router = APIRouter(tags=["therapist-shared"])
 sb = SupabaseClient()
 # ---------------------------------------------------------------------------
 # Pydantic request models
@@ -793,7 +794,7 @@ def homework_update_any(homework_id: str, body: HomeworkUpdateRequest, request: 
     refreshed = _select_optional_table("patient_homework", filters={"homework_id": f"eq.{homework_id}"})
     return refreshed[0] if refreshed else row
 
-@router.get("/api/patient/homework")
+@shared_router.get("/api/patient/homework")
 def homework_list_patient(request: Request):
     user = require_user(request)
     patient_id = str(user["id"])
@@ -815,7 +816,7 @@ def homework_list_patient(request: Request):
 # Invitations & linking
 # =======================================================================
 
-@router.post("/api/invite-therapist")
+@shared_router.post("/api/invite-therapist")
 def patient_invite_therapist(body: InviteRequest, request: Request):
     user = require_user(request)
     if str(user.get("role") or "").lower() != "patient":
@@ -921,7 +922,7 @@ def _create_invite_or_request(inviter: dict, email: str, invite_type: str, expec
         "accept_url": f"/invite/accept?token={token}",
     }
 
-@router.get("/api/links/pending")
+@shared_router.get("/api/links/pending")
 def links_pending(request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -949,7 +950,7 @@ def links_pending(request: Request):
         enriched.append({**link, "counterparty": counterparty})
     return {"links": enriched}
 
-@router.get("/api/links")
+@shared_router.get("/api/links")
 def links_all(request: Request):
     """All links for the current user, any status."""
     user = require_user(request)
@@ -961,7 +962,7 @@ def links_all(request: Request):
     enriched = [{**r, "counterparty": _link_counterparty(r, uid)} for r in rows]
     return {"links": enriched}
 
-@router.post("/api/links/{link_id}/accept")
+@shared_router.post("/api/links/{link_id}/accept")
 def links_accept(link_id: str, request: Request):
     """The party currently in 'pending_*' accepts. For patient-initiated:
     therapist accepts (moves to pending_patient for consent confirmation).
@@ -997,7 +998,7 @@ def links_accept(link_id: str, request: Request):
     refreshed = _select_optional_table("patient_therapist_links", filters={"link_id": f"eq.{link_id}"})
     return {"link": refreshed[0] if refreshed else {**link, **updates}}
 
-@router.post("/api/links/{link_id}/decline")
+@shared_router.post("/api/links/{link_id}/decline")
 def links_decline(link_id: str, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1014,7 +1015,7 @@ def links_decline(link_id: str, request: Request):
     )
     return {"declined": True, "link_id": link_id}
 
-@router.post("/api/links/{link_id}/confirm-consent")
+@shared_router.post("/api/links/{link_id}/confirm-consent")
 def links_confirm_consent(link_id: str, body: ConsentConfirmRequest, request: Request):
     """Patient confirms consent with scopes. Activates the link."""
     user = require_user(request)
@@ -1047,7 +1048,7 @@ def links_confirm_consent(link_id: str, body: ConsentConfirmRequest, request: Re
     refreshed = _select_optional_table("patient_therapist_links", filters={"link_id": f"eq.{link_id}"})
     return {"link": refreshed[0] if refreshed else {**link, **updates}}
 
-@router.post("/api/links/{link_id}/revoke")
+@shared_router.post("/api/links/{link_id}/revoke")
 def links_revoke(link_id: str, body: LinkRevokeRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1071,7 +1072,7 @@ def links_revoke(link_id: str, body: LinkRevokeRequest, request: Request):
     )
     return {"revoked": True, "link_id": link_id}
 
-@router.get("/api/invite/info")
+@shared_router.get("/api/invite/info")
 def invite_info(request: Request):
     token = request.query_params.get("token")
     if not token:
@@ -1084,7 +1085,7 @@ def invite_info(request: Request):
     invite["inviter"] = _user_summary(inviter[0]) if inviter else None
     return invite
 
-@router.post("/api/invite/accept")
+@shared_router.post("/api/invite/accept")
 def invite_accept(request: Request, body: dict = {}):
     token = (body or {}).get("token") or request.query_params.get("token")
     if not token:
@@ -1213,21 +1214,28 @@ def messages_mark_read(message_id: str, request: Request):
 # =======================================================================
 
 @router.get("/crisis")
-def crisis_list(request: Request):
+def crisis_list(request: Request, patient_id: Optional[str] = None):
     user = _require_therapist(request)
     therapist_id = str(user["id"])
     links = _select_optional_table(
         "patient_therapist_links",
         filters={"therapist_id": f"eq.{therapist_id}", "status": "eq.active"},
     )
-    patient_ids = [str(lk.get("patient_id")) for lk in links]
-    if not patient_ids:
+    linked_ids = {str(lk.get("patient_id")) for lk in links}
+    if not linked_ids:
         return {"events": []}
-    # Fetch only crisis events for linked patients (not entire table)
+    if patient_id:
+        if patient_id not in linked_ids:
+            raise HTTPException(status_code=403, detail={"message": "Patient not linked to this therapist."})
+        scope_ids = [patient_id]
+    else:
+        scope_ids = list(linked_ids)
     mine: List[dict] = []
-    for pid in patient_ids:
+    for pid in scope_ids:
         rows = _select_optional_table("crisis_events", filters={"patient_id": f"eq.{pid}"})
         mine.extend(rows)
+    # Hide synthetic test-alert events — they are patient-initiated flow checks, not clinical events.
+    mine = [e for e in mine if (e.get("intervention_type") or "") != "test_alert"]
     mine.sort(key=lambda c: str(c.get("created_at") or ""), reverse=True)
     return {"events": mine}
 
@@ -1273,7 +1281,7 @@ def crisis_resolve(event_id: str, request: Request):
 # Reports & Feedback (extending existing)
 # =======================================================================
 
-@router.post("/api/reports")
+@shared_router.post("/api/reports")
 def reports_submit(body: ReportSubmitRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1294,7 +1302,7 @@ def reports_submit(body: ReportSubmitRequest, request: Request):
         raise
     return row
 
-@router.post("/api/feedback")
+@shared_router.post("/api/feedback")
 def feedback_submit(body: FeedbackSubmitRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1403,7 +1411,7 @@ def export_patient_pdf(patient_id: str, request: Request):
 # Patient-side read endpoints (therapists the patient has linked)
 # =======================================================================
 
-@router.get("/api/patient/therapists")
+@shared_router.get("/api/patient/therapists")
 def patient_therapists(request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1412,7 +1420,7 @@ def patient_therapists(request: Request):
     enriched = [{**r, "therapist": _link_counterparty(r, uid)} for r in rows]
     return {"links": enriched}
 
-@router.get("/api/patient/access-log")
+@shared_router.get("/api/patient/access-log")
 def patient_access_log(request: Request):
     user = require_user(request)
     uid = str(user["id"])

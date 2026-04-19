@@ -220,7 +220,7 @@ def oauth_start(provider: str):
         nonce,
         max_age=OAUTH_MAX_AGE_SECONDS,
         httponly=True,
-        samesite="lax",
+        samesite="lax",  # must be lax: cookie is read after a cross-site OAuth redirect
         path="/",
     )
     return resp

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Navigation, MobileNavigation } from "@/components/Navigation";
 import BackgroundDecor from "@/components/auth/BackgroundDecor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +18,7 @@ import {
 } from "@/types/auth";
 import {
     ArrowLeft, FileText, StickyNote, ClipboardList, Activity, AlertTriangle,
-    Loader2, Download, Plus, MessageSquare, Calendar, Trash2, Brain, Smile,
+    Loader2, Download, Plus, Calendar, Trash2, Brain, Smile, CheckCircle2,
 } from "lucide-react";
 
 interface PatientDetail {
@@ -54,10 +54,22 @@ interface MoodEntry {
     created_at?: string;
 }
 
+interface PrepBrief {
+    top_concerns?: string[];
+    recent_shifts?: string;
+    unresolved_topics?: string[];
+    suggested_focus?: string;
+    risk_notes?: string;
+}
+
 export default function PatientView() {
     const { id: patientId } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { toast } = useToast();
+    const [searchParams] = useSearchParams();
+    const initialTab = searchParams.get("tab") || "sessions";
+    const focusEventId = searchParams.get("event");
+    const focusEventRef = useRef<HTMLDivElement>(null);
 
     const [loading, setLoading] = useState(true);
     const [patient, setPatient] = useState<PatientDetail | null>(null);
@@ -67,7 +79,7 @@ export default function PatientView() {
     const [plans, setPlans] = useState<TreatmentPlan[]>([]);
     const [homework, setHomework] = useState<HomeworkItem[]>([]);
     const [crisis, setCrisis] = useState<CrisisEvent[]>([]);
-    const [prepBrief, setPrepBrief] = useState<string | null>(null);
+    const [prepBrief, setPrepBrief] = useState<PrepBrief | null>(null);
     const [prepLoading, setPrepLoading] = useState(false);
 
     const [selectedConv, setSelectedConv] = useState<string | null>(null);
@@ -92,7 +104,12 @@ export default function PatientView() {
         setLoading(true);
         try {
             const [det, convs, mo, ns, pl, hw, cr] = await Promise.all([
-                therapistFetchJson<PatientDetail>(`/api/therapist/patients/${patientId}`),
+                therapistFetchJson<{
+                    patient: { user_id: string; name?: string; email?: string };
+                    personality?: Record<string, unknown>;
+                    stats?: Record<string, unknown>;
+                    link?: { patient_consented_at?: string; created_at?: string; consent_scope?: Record<string, boolean> };
+                }>(`/api/therapist/patients/${patientId}`),
                 therapistFetchJson<{ conversations: ConversationItem[] }>(`/api/therapist/patients/${patientId}/conversations`),
                 therapistFetchJson<{ mood: MoodEntry[] }>(`/api/therapist/patients/${patientId}/mood`),
                 therapistFetchJson<{ notes: TherapistNote[] }>(`/api/therapist/notes?patient_id=${patientId}`),
@@ -100,7 +117,15 @@ export default function PatientView() {
                 therapistFetchJson<{ homework: HomeworkItem[] }>(`/api/therapist/homework?patient_id=${patientId}`),
                 therapistFetchJson<{ events: CrisisEvent[] }>(`/api/therapist/crisis?patient_id=${patientId}`),
             ]);
-            setPatient(det);
+            setPatient({
+                user_id: det.patient?.user_id ?? patientId,
+                name: det.patient?.name,
+                email: det.patient?.email,
+                personality: det.personality,
+                stats: det.stats,
+                linked_since: det.link?.patient_consented_at || det.link?.created_at,
+                consent_scope: det.link?.consent_scope,
+            });
             setConversations(convs.conversations || []);
             setMood(mo.mood || []);
             setNotes(ns.notes || []);
@@ -115,6 +140,12 @@ export default function PatientView() {
     }, [patientId, toast]);
 
     useEffect(() => { loadPatient(); }, [loadPatient]);
+
+    useEffect(() => {
+        if (focusEventId && focusEventRef.current) {
+            focusEventRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }, [focusEventId, crisis]);
 
     const openConversation = async (convId: string) => {
         setSelectedConv(convId);
@@ -134,8 +165,8 @@ export default function PatientView() {
     const loadPrepBrief = async () => {
         setPrepLoading(true);
         try {
-            const data = await therapistFetchJson<{ brief: string }>(`/api/therapist/patients/${patientId}/prep-brief`);
-            setPrepBrief(data.brief);
+            const data = await therapistFetchJson<PrepBrief>(`/api/therapist/patients/${patientId}/prep-brief`);
+            setPrepBrief(data);
         } catch (err: any) {
             toast({ title: "Couldn't generate brief", description: err.message, variant: "destructive" });
         } finally {
@@ -213,10 +244,15 @@ export default function PatientView() {
     };
 
     const escalateCrisis = async () => {
+        if (!patientId) return;
         try {
-            await therapistFetchJson(`/api/therapist/crisis/${patientId}/escalate`, {
+            await therapistFetchJson(`/api/therapist/crisis/escalate`, {
                 method: "POST",
-                body: JSON.stringify({ severity: crisisSeverity, context: { notes: crisisContext } }),
+                body: JSON.stringify({
+                    patient_id: patientId,
+                    severity: crisisSeverity,
+                    notes: crisisContext,
+                }),
             });
             setShowCrisisDialog(false);
             setCrisisContext("");
@@ -224,6 +260,16 @@ export default function PatientView() {
             await loadPatient();
         } catch (err: any) {
             toast({ title: "Escalation failed", description: err.message, variant: "destructive" });
+        }
+    };
+
+    const resolveCrisis = async (eventId: string) => {
+        try {
+            await therapistFetchJson(`/api/therapist/crisis/${eventId}/resolve`, { method: "POST" });
+            toast({ title: "Crisis resolved", description: "Event marked as closed." });
+            await loadPatient();
+        } catch (err: any) {
+            toast({ title: "Resolve failed", description: err.message, variant: "destructive" });
         }
     };
 
@@ -290,9 +336,45 @@ export default function PatientView() {
                             <CardTitle className="flex items-center gap-2 text-base"><Brain className="h-5 w-5" /> Pre-session brief</CardTitle>
                             <Button variant="ghost" size="sm" onClick={() => setPrepBrief(null)}>Dismiss</Button>
                         </CardHeader>
-                        <CardContent>
-                            <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">{prepBrief}</pre>
-                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-4">AI draft — review before clinical use</p>
+                        <CardContent className="space-y-4 text-sm leading-relaxed">
+                            {prepBrief.top_concerns && prepBrief.top_concerns.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Top concerns</p>
+                                    <ul className="list-disc list-inside space-y-0.5">
+                                        {prepBrief.top_concerns.map((c, i) => <li key={i}>{c}</li>)}
+                                    </ul>
+                                </div>
+                            )}
+                            {prepBrief.recent_shifts && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Recent shifts</p>
+                                    <p className="whitespace-pre-wrap">{prepBrief.recent_shifts}</p>
+                                </div>
+                            )}
+                            {prepBrief.unresolved_topics && prepBrief.unresolved_topics.length > 0 && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Unresolved topics</p>
+                                    <ul className="list-disc list-inside space-y-0.5">
+                                        {prepBrief.unresolved_topics.map((t, i) => <li key={i}>{t}</li>)}
+                                    </ul>
+                                </div>
+                            )}
+                            {prepBrief.suggested_focus && (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Suggested focus</p>
+                                    <p className="whitespace-pre-wrap">{prepBrief.suggested_focus}</p>
+                                </div>
+                            )}
+                            {prepBrief.risk_notes && (
+                                <div className="rounded-xl border border-rose-300 bg-rose-50 dark:bg-rose-950/20 p-3 text-xs text-rose-700 dark:text-rose-300">
+                                    <p className="font-semibold mb-1">Risk notes</p>
+                                    <p className="whitespace-pre-wrap">{prepBrief.risk_notes}</p>
+                                </div>
+                            )}
+                            {!prepBrief.top_concerns?.length && !prepBrief.recent_shifts && !prepBrief.unresolved_topics?.length && !prepBrief.suggested_focus && !prepBrief.risk_notes && (
+                                <p className="text-muted-foreground italic">Not enough prior session data to generate a brief yet.</p>
+                            )}
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground pt-2 border-t">AI draft — review before clinical use</p>
                         </CardContent>
                     </Card>
                 )}
@@ -311,7 +393,7 @@ export default function PatientView() {
                     </Card>
                 )}
 
-                <Tabs defaultValue="sessions" className="space-y-4">
+                <Tabs defaultValue={initialTab} className="space-y-4">
                     <TabsList className="grid grid-cols-6 max-w-4xl">
                         <TabsTrigger value="sessions"><FileText className="h-4 w-4 mr-1" /> Sessions</TabsTrigger>
                         <TabsTrigger value="notes"><StickyNote className="h-4 w-4 mr-1" /> Notes</TabsTrigger>
@@ -528,18 +610,54 @@ export default function PatientView() {
                     <TabsContent value="crisis" className="space-y-3">
                         {crisis.length === 0 ? (
                             <p className="text-center text-sm text-muted-foreground py-8">No crisis events logged.</p>
-                        ) : crisis.map((c) => (
-                            <Card key={c.event_id} className={`rounded-2xl ${!c.resolved_at ? "border-rose-300" : ""}`}>
-                                <CardContent className="p-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <Badge variant={c.severity === "critical" || c.severity === "high" ? "destructive" : "outline"}>{c.severity}</Badge>
-                                        <span className="text-xs text-muted-foreground">{c.created_at && new Date(c.created_at).toLocaleString()}</span>
-                                    </div>
-                                    <p className="text-sm">Triggered by: {c.triggered_by}</p>
-                                    {c.resolved_at ? <Badge variant="secondary" className="mt-2">Resolved</Badge> : <Badge variant="destructive" className="mt-2">Open</Badge>}
-                                </CardContent>
-                            </Card>
-                        ))}
+                        ) : crisis.map((c) => {
+                            const isFocused = focusEventId === c.event_id;
+                            return (
+                            <div key={c.event_id} ref={isFocused ? focusEventRef : undefined}>
+                                <Card className={`rounded-2xl ${!c.resolved_at ? "border-rose-300" : ""} ${isFocused ? "ring-2 ring-rose-400" : ""}`}>
+                                    <CardContent className="p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <Badge variant={c.severity === "critical" || c.severity === "high" ? "destructive" : "outline"}>{c.severity}</Badge>
+                                                {typeof c.severity_score === "number" && (
+                                                    <Badge variant="outline" className="text-[10px]">score {c.severity_score.toFixed(2)}</Badge>
+                                                )}
+                                                {c.intervention_type && c.intervention_type !== "modal_shown" && (
+                                                    <Badge variant="secondary" className="text-[10px]">{c.intervention_type.replace(/_/g, " ")}</Badge>
+                                                )}
+                                            </div>
+                                            <span className="text-xs text-muted-foreground">{c.created_at && new Date(c.created_at).toLocaleString()}</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">Triggered by: {c.triggered_by}</p>
+                                        {c.trigger_text && (
+                                            <div className="rounded-xl border border-border bg-muted/30 p-3">
+                                                <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">What triggered this</p>
+                                                <p className="text-sm whitespace-pre-wrap">{c.trigger_text}</p>
+                                            </div>
+                                        )}
+                                        {c.keyword_matches && c.keyword_matches.length > 0 && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {c.keyword_matches.slice(0, 10).map((kw, i) => (
+                                                    <Badge key={i} variant="outline" className="text-[10px]">{kw}</Badge>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="flex items-center justify-end pt-1">
+                                            {c.resolved_at ? (
+                                                <Badge variant="secondary">
+                                                    Resolved {new Date(c.resolved_at).toLocaleDateString()}
+                                                </Badge>
+                                            ) : (
+                                                <Button size="sm" variant="outline" onClick={() => resolveCrisis(c.event_id)}>
+                                                    <CheckCircle2 className="h-4 w-4 mr-1" /> Mark resolved
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                            );
+                        })}
                     </TabsContent>
                 </Tabs>
             </main>
