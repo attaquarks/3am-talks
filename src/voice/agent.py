@@ -221,22 +221,40 @@ async def _bootstrap_conversation(backend_base_url: str, voice_agent_secret: str
 def _build_tts():
     """Build TTS with ElevenLabs primary + Edge TTS fallback.
 
-    If ELEVEN_API_KEY is unset/empty, skip ElevenLabs and use Edge alone.
-    Otherwise wrap both in FallbackAdapter: the adapter retries ElevenLabs
-    max_retry_per_tts times (connection errors / 5xx / auth rejections on
-    exhausted credits) before switching to Edge for the remainder of the
-    utterance.
+    Key resolution: ELEVEN_TTS_API_KEY → ELEVEN_API_KEY. If neither is set,
+    skip ElevenLabs entirely and use Edge alone. Otherwise wrap both in
+    FallbackAdapter: the adapter retries ElevenLabs max_retry_per_tts
+    times (connection errors / 5xx / auth rejections on exhausted credits)
+    before switching to Edge for the remainder of the utterance.
     """
     edge_voice = os.getenv("EDGE_TTS_VOICE", "en-US-JennyNeural")
     edge_tts = EdgeTTS(voice=edge_voice)
 
-    if not os.getenv("ELEVEN_API_KEY"):
-        logger.warning("ELEVEN_API_KEY not set; using Edge TTS only")
+    tts_key = os.getenv("ELEVEN_TTS_API_KEY") or os.getenv("ELEVEN_API_KEY")
+    if not tts_key:
+        logger.warning("No ElevenLabs TTS key set; using Edge TTS only")
         return edge_tts
 
     eleven_voice_id = os.getenv("ELEVEN_VOICE_ID", "l7kNoIfnJKPg7779LI2t")
-    primary = elevenlabs.TTS(voice_id=eleven_voice_id)
+    primary = elevenlabs.TTS(voice_id=eleven_voice_id, api_key=tts_key)
     return TTSFallbackAdapter([primary, edge_tts], max_retry_per_tts=1)
+
+
+def _build_stt():
+    """Build ElevenLabs STT with optional language + split-key overrides.
+
+    Key resolution: ELEVEN_STT_API_KEY → ELEVEN_API_KEY. ELEVEN_STT_LANGUAGE
+    accepts an ISO 639-1 code (e.g. 'en', 'ur', 'hi'); when unset the
+    model auto-detects the spoken language.
+    """
+    kwargs: dict = {"model_id": "scribe_v2_realtime"}
+    stt_key = os.getenv("ELEVEN_STT_API_KEY") or os.getenv("ELEVEN_API_KEY")
+    if stt_key:
+        kwargs["api_key"] = stt_key
+    language = os.getenv("ELEVEN_STT_LANGUAGE", "en").strip()
+    if language:
+        kwargs["language_code"] = language
+    return elevenlabs.STT(**kwargs)
 
 
 def build_session() -> AgentSession:
@@ -247,10 +265,7 @@ def build_session() -> AgentSession:
             min_silence_duration=0.5,
             activation_threshold=0.5,
         ),
-        stt=elevenlabs.STT(
-            model_id="scribe_v2_realtime",
-            language_code="en",
-        ),
+        stt=_build_stt(),
         # LLM is intentionally overridden in Ella.llm_node() to call the backend.
         llm=openai.LLM(model="psychocounsel", base_url="http://localhost", api_key="empty"),
         tts=_build_tts(),

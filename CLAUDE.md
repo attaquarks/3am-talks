@@ -259,7 +259,10 @@ Required environment variables (`.env` in project root):
   voice agent skips ElevenLabs entirely and uses Edge TTS alone. If set,
   ElevenLabs TTS is wrapped in `livekit.agents.tts.FallbackAdapter` with
   Edge TTS as the fallback, so exhausted credits / auth errors / 5xx
-  transparently fail over mid-session.
+  transparently fail over mid-session. STT and TTS can optionally be
+  split across two ElevenLabs accounts via `ELEVEN_STT_API_KEY` and
+  `ELEVEN_TTS_API_KEY` (each falls back to `ELEVEN_API_KEY` if unset) to
+  double the free-tier credit pool.
 - `VOICE_AGENT_SECRET` — HMAC shared secret between backend and voice agent
 
 Optional:
@@ -274,7 +277,12 @@ Optional:
   `src/routes/auth.py`. Set to the Vercel URL in production so Google /
   Facebook sign-in doesn't bounce users back to localhost.
 - `ELEVEN_VOICE_ID` — override the ElevenLabs TTS voice (default Rachel,
-  `l7kNoIfnJKPg7779LI2t`).
+  `l7kNoIfnJKPg7779LI2t`). For Urdu / Hindi, pick a multilingual voice
+  from https://elevenlabs.io/app/voice-library.
+- `ELEVEN_STT_LANGUAGE` — ISO 639-1 language code for Scribe STT. Default
+  `en`. Use `ur` for Urdu, `hi` for Hindi, or blank for auto-detection.
+- `ELEVEN_STT_API_KEY`, `ELEVEN_TTS_API_KEY` — optional per-feature key
+  overrides (see `ELEVEN_API_KEY` above).
 - `EDGE_TTS_VOICE` — override the Edge TTS fallback voice (default
   `en-US-JennyNeural`).
 
