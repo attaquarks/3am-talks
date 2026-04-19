@@ -451,9 +451,10 @@ def llm_arbitrate(
     import os
     import httpx
 
-    url = os.getenv("COLAB_API_URL")
-    if not url:
-        return {"available": False, "reason": "COLAB_API_URL not set"}
+    from ai_layer.llm_client import post_chat_completion
+
+    if not (os.getenv("LLM_PRIMARY_URL") or os.getenv("COLAB_API_URL")):
+        return {"available": False, "reason": "No LLM endpoint configured"}
 
     if history:
         user_content = _LLM_ARBITER_CONTEXT_TEMPLATE.format(
@@ -473,15 +474,10 @@ def llm_arbitrate(
         "temperature": 0.0,
         "response_format": {"type": "json_object"},
     }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
-    }
 
     try:
         with httpx.Client(timeout=timeout_seconds) as client:
-            r = client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
+            r = post_chat_completion(payload, client=client)
             data = r.json()
         content = (
             data.get("choices", [{}])[0].get("message", {}).get("content", "")

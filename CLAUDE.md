@@ -211,9 +211,18 @@ npm run check                 # TypeScript
 
 ### Start All Services
 ```bash
-start.bat                     # Windows
+start.bat                     # Windows — local dev (frontend vite on :5173)
+vercel.bat                    # Windows — Vercel-deployed frontend; starts ngrok
 # ./start.sh                  # Linux / macOS
 ```
+
+`start.bat` launches backend + local Vite dev server + voice agent. Use it
+for pure local development.
+
+`vercel.bat` launches backend + `ngrok` tunnel (pinned to the reserved
+static domain) + voice agent. Use it when iterating against the live
+frontend on Vercel — the deployed site proxies `/api/*` through the
+tunnel to your laptop's backend. See [Deployment](#deployment) below.
 
 ### Testing
 ```bash
@@ -233,20 +242,32 @@ Required environment variables (`.env` in project root):
 - `SESSION_SECRET` *(fail-fast on missing)*
 - `PINECONE_API_KEY`, `PINECONE_ENVIRONMENT`, `PINECONE_INDEX_NAME`
   *(default `3am-talks-rag`)*
-- `COLAB_API_URL` — OpenAI-compatible LLM endpoint (also used by the
-  crisis arbiter)
+- **LLM endpoints** — OpenAI-compatible `/v1/chat/completions` shape.
+  Resolved by `src/ai_layer/llm_client.py` in priority order:
+  - `LLM_PRIMARY_URL` / `LLM_PRIMARY_API_KEY` — primary (e.g. Ollama on
+    a LAN peer or Tailscale). Key defaults to `ollama` when unset.
+  - `LLM_FALLBACK_URL` / `LLM_FALLBACK_API_KEY` — used when primary is
+    unreachable. Falls back further to `COLAB_API_URL` / `COLAB_API_KEY`
+    if these are absent, so existing deployments keep working.
+  - At least one of `LLM_PRIMARY_URL` or `COLAB_API_URL` must be set.
+  Failover triggers on connection errors and 5xx only — read timeouts
+  are not retried, so caller time budgets (e.g. the 8 s crisis arbiter)
+  are respected.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
 - `ELEVEN_API_KEY`
 - `VOICE_AGENT_SECRET` — HMAC shared secret between backend and voice agent
 
 Optional:
 
-- `COLAB_API_KEY` — auth header for Colab (defaults to `EMPTY`)
 - `CRISIS_ARBITER_MODEL` — model name for the arbiter (default `psychocounsel`)
 - `ROBERTA_REMOTE_URL` — if set, RoBERTa is scored over HTTP instead of
   loaded locally
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` —
   crisis alert dispatch
+- `FRONTEND_URL` — absolute URL of the deployed frontend (default
+  `http://localhost:5173`). Used for the OAuth success redirect in
+  `src/routes/auth.py`. Set to the Vercel URL in production so Google /
+  Facebook sign-in doesn't bounce users back to localhost.
 
 ---
 
@@ -259,6 +280,51 @@ Optional:
    `Models/roberta-base-suicide-prediction-phr/` *or* `ROBERTA_REMOTE_URL`
    pointing at a `/classify` endpoint. Without either, the RoBERTa stage
    returns `0.0` and the pipeline falls back to keyword + LLM arbiter only.
+
+---
+
+## Deployment
+
+The frontend is deployed on **Vercel** (Hobby plan, free). The backend
+runs on a developer's laptop and is exposed through an **ngrok** tunnel;
+Vercel rewrites `/api/*` to the tunnel host. There is no paid hosting
+in the loop.
+
+- Vercel project: `abdullahfarid1s-projects/frontend`, root directory
+  `frontend/`, framework auto-detected as Vite.
+- Stable production URL: `https://frontend-ten-rho-38.vercel.app`.
+- ngrok reserved domain: `earache-procurer-console.ngrok-free.dev`
+  (pinned via `ngrok http --domain=... 5050` so `vercel.json`'s rewrite
+  doesn't change across restarts).
+- `frontend/vercel.json` owns two rewrites:
+  1. `/api/:path*` → `https://<ngrok-domain>/api/:path*` (backend proxy).
+  2. `/((?!api/).*)` → `/index.html` (SPA fallback).
+
+### Deploy a new frontend build
+```bash
+cd frontend
+vercel deploy --prod --yes     # uploads local files; requires `vercel login` once
+```
+
+### Run the backend for the deployed frontend
+```bash
+vercel.bat                     # backend + ngrok (static domain) + voice agent
+```
+
+### Notes for future edits
+- Because the browser only sees the Vercel origin (the ngrok host is
+  hidden behind the rewrite), `CORSMiddleware` in `src/main.py` does
+  **not** need the Vercel origin added, and session cookies stay
+  `SameSite=Lax` / non-secure. Preserve that invariant — if you ever
+  replace the rewrite with direct cross-origin calls, you must also
+  allowlist the Vercel origin *and* flip cookies to `SameSite=None;
+  Secure`.
+- Vercel Hobby-plan rewrites impose a ~30 s response timeout. Keep
+  `/api/chat` end-to-end under that when the LLM is slow or the browser
+  sees a 504 despite the backend still working.
+- Add `FRONTEND_URL=https://frontend-ten-rho-38.vercel.app` and the same
+  URL plus `/auth/oauth-success` to Supabase → Authentication → Redirect
+  URLs, otherwise OAuth success will bounce to localhost.
 
 ---
 

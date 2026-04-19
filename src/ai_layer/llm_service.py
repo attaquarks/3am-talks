@@ -5,6 +5,8 @@ import os
 from typing import Dict, Optional, List
 from dotenv import load_dotenv
 
+from ai_layer.llm_client import post_chat_completion
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,13 +18,13 @@ class LLMService:
     """
     Service for interacting with the LLM.
     Handles prompt construction and API communication using OpenAI compatible style endpoints.
+    Endpoint selection + primary/fallback failover is handled by `llm_client`.
     """
 
     def __init__(self, model_name: str = "psychocounsel"):
         self.model_name = model_name
-        self.colab_api_url = os.getenv("COLAB_API_URL")
-        if not self.colab_api_url:
-            logger.warning("COLAB_API_URL is not set in environment variables.")
+        if not (os.getenv("LLM_PRIMARY_URL") or os.getenv("COLAB_API_URL")):
+            logger.warning("No LLM endpoint configured (LLM_PRIMARY_URL / COLAB_API_URL).")
         self.client = httpx.Client(timeout=180.0)
 
     # Core Persona - Warm, empathetic counselor who builds genuine connections
@@ -137,7 +139,7 @@ Remember: You're having a real conversation. Be natural, be human, be caring.
         }
 
         try:
-            logger.info(f"Sending request to Colab API: {self.colab_api_url}")
+            logger.info("Sending request to LLM endpoint (primary/fallback via llm_client).")
 
             # Log the full system prompt for debugging
             logger.info("=" * 80)
@@ -146,15 +148,7 @@ Remember: You're having a real conversation. Be natural, be human, be caring.
             logger.info(messages[0]["content"])
             logger.info("=" * 80)
 
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
-            }
-
-            response = self.client.post(
-                self.colab_api_url, json=payload, headers=headers
-            )
-            response.raise_for_status()
+            response = post_chat_completion(payload, client=self.client)
 
             result = response.json()
             # OpenAI compatible response structure
