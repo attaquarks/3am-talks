@@ -12,7 +12,7 @@ interface UseVoiceCallReturn {
   isConnecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
-  disconnect: () => void;
+  disconnect: () => Promise<void>;
 }
 
 /**
@@ -53,7 +53,17 @@ export function useVoiceCall(): UseVoiceCallReturn {
     }
   }, []);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
+    try {
+      await fetch("/api/session/flush", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+      });
+    } catch {
+      // Best-effort flush; UI disconnect should continue even if flush fails.
+    }
     setConnectionDetails(null);
     setError(null);
   }, []);

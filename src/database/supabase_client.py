@@ -3,9 +3,11 @@ from typing import Optional
 import httpx
 import logging
 from dotenv import load_dotenv
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
-load_dotenv()
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 
 
 def normalize_postgrest_value(value: Optional[str]) -> str:
@@ -87,8 +89,43 @@ class SupabaseClient:
         except Exception as e:
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 409:
                 logger.debug(f"Conflict inserting into {table}: {e}")
+            elif isinstance(e, httpx.HTTPStatusError):
+                body = (e.response.text or "")[:1500]
+                logger.error(
+                    "Error inserting into %s: %s | response=%s",
+                    table,
+                    e,
+                    body,
+                )
             else:
                 logger.error(f"Error inserting into {table}: {e}")
+            raise
+
+    def insert_many(self, table: str, rows: list[dict]) -> list[dict]:
+        """Insert multiple rows into a table in one request."""
+        if not rows:
+            return []
+
+        url = self._build_url(table)
+
+        try:
+            response = self.client.post(url, headers=self.headers, json=rows)
+            response.raise_for_status()
+            result = response.json()
+            return result if isinstance(result, list) else [result]
+        except Exception as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 409:
+                logger.debug(f"Conflict inserting batch into {table}: {e}")
+            elif isinstance(e, httpx.HTTPStatusError):
+                body = (e.response.text or "")[:1500]
+                logger.error(
+                    "Error inserting batch into %s: %s | response=%s",
+                    table,
+                    e,
+                    body,
+                )
+            else:
+                logger.error(f"Error inserting batch into {table}: {e}")
             raise
     
     def update(self, table: str, data: dict, filters: dict) -> dict:
@@ -106,7 +143,16 @@ class SupabaseClient:
             result = response.json()
             return result[0] if isinstance(result, list) and len(result) > 0 else result
         except Exception as e:
-            logger.error(f"Error updating {table}: {e}")
+            if isinstance(e, httpx.HTTPStatusError):
+                body = (e.response.text or "")[:1500]
+                logger.error(
+                    "Error updating %s: %s | response=%s",
+                    table,
+                    e,
+                    body,
+                )
+            else:
+                logger.error(f"Error updating {table}: {e}")
             raise
     
     def delete(self, table: str, filters: dict) -> dict:

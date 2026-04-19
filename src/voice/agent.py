@@ -27,7 +27,18 @@ from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, 
 from livekit.agents.llm import ChatChunk, FunctionTool, ChatContext
 from livekit.agents import ModelSettings
 from livekit.plugins import openai, elevenlabs, silero
-from voice.tts_plugin import TTS as EdgeTTS
+
+try:
+    # Preferred when running as module: `python -m src.voice.agent`.
+    from .tts_plugin import TTS as EdgeTTS
+except ImportError:
+    try:
+        # Works when src/ is on PYTHONPATH.
+        from voice.tts_plugin import TTS as EdgeTTS
+    except ImportError:
+        # Fallback for direct script execution from src/voice/.
+        from tts_plugin import TTS as EdgeTTS
+
 import httpx
 
 load_dotenv()
@@ -159,6 +170,16 @@ class Ella(Agent):
             logger.error(f"[crisis] publish_data failed: {exc}")
 
     async def on_exit(self) -> None:
+        try:
+            url = f"{self._backend_base_url}/api/voice/end"
+            headers = {"Authorization": f"Bearer {self._voice_agent_secret}"}
+            payload = {
+                "user_id": self._user_id,
+                "conversation_id": self._conversation_id,
+            }
+            await self._http.post(url, json=payload, headers=headers)
+        except Exception as e:
+            logger.warning(f"[on_exit] voice/end flush failed: {type(e).__name__}: {e}")
         try:
             await self._http.aclose()
         except Exception:

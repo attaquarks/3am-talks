@@ -72,7 +72,7 @@ export default function VoiceCall({ className }: VoiceCallProps) {
     useVoiceCall();
 
   const handleDisconnect = useCallback(() => {
-    disconnect();
+    void disconnect();
   }, [disconnect]);
 
   // ── Not connected: show "Talk to Ella" button ─────────────────────────

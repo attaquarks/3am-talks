@@ -82,7 +82,7 @@ def get_table_record(table: str, record_id: str, request: Request):
         if table == "conversations":
             rid = normalize_postgrest_value(record_id)
             conv = mgr.user_service.get_conversation(rid)
-            if not conv:
+            if not conv or str(conv.get("user_id") or "") != user_id:
                 raise HTTPException(status_code=404, detail="Conversation not found")
             return _backend_conversation_to_frontend(conv)
 
@@ -129,11 +129,7 @@ def create_table_record(table: str, request: Request, body: dict = {}):
             session_result = mgr.start_session(user_id)
             conv_id = session_result["conversation_id"]
             conv = mgr.user_service.get_conversation(conv_id) or {}
-            frontend_conv = _backend_conversation_to_frontend(conv)
-            
-            # Apply frontend fields
-            frontend_conv.update({k: v for k, v in body.items() if k in ["title", "mood", "tags", "duration_minutes"]})
-            return frontend_conv
+            return _backend_conversation_to_frontend(conv)
 
         elif table == "messages":
             conv_id = body.get("conversation_id")
@@ -217,10 +213,27 @@ def update_table_record(table: str, record_id: str, request: Request, body: dict
     try:
         if table == "conversations":
             rid = normalize_postgrest_value(record_id)
-            updates = {k: v for k, v in body.items() if k in ["is_active", "duration_minutes", "title", "mood", "summary", "tags"]}
+
+            conv = mgr.user_service.get_conversation(rid)
+            if not conv or str(conv.get("user_id") or "") != user_id:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+
+            # Current Supabase schema supports only lifecycle/turn fields for conversations.
+            updates = {k: v for k, v in body.items() if k in ["is_active", "started_at", "ended_at"]}
+
+            # Back-compat: frontend may PATCH duration_minutes. Since duration_minutes
+            # is not a DB column, mark session ended using ended_at + is_active=false.
+            if body.get("duration_minutes") is not None and "ended_at" not in updates:
+                updates["ended_at"] = now
+                updates.setdefault("is_active", False)
+
             if updates:
-                mgr.db_client.update("conversations", updates, {"conversation_id": f"eq.{rid}"})
-            
+                mgr.db_client.update(
+                    "conversations",
+                    updates,
+                    {"conversation_id": f"eq.{rid}", "user_id": f"eq.{user_id}"},
+                )
+
             conv = mgr.user_service.get_conversation(rid)
             return _backend_conversation_to_frontend(conv)
 

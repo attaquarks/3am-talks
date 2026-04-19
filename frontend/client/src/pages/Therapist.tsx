@@ -129,6 +129,19 @@ export default function Therapist() {
     }
   };
 
+  const flushCurrentSession = useCallback(async () => {
+    if (!currentConversationId) return;
+    try {
+      await fetch('/api/session/flush', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: currentConversationId }),
+      });
+    } catch (error) {
+      console.warn('Session flush failed:', error);
+    }
+  }, [currentConversationId]);
+
   const loadMessages = useCallback(async (conversationId: string) => {
     // Cancel any in-flight message fetch to prevent stale data from overwriting
     if (messagesAbortRef.current) {
@@ -256,11 +269,20 @@ export default function Therapist() {
       const duration = Math.floor((endTime.getTime() - sessionStartTime.getTime()) / 1000 / 60);
 
       try {
-        // Update conversation duration using PATCH
+        await fetch('/api/session/flush', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: currentConversationId }),
+        });
+
+        // Mark session ended in conversation lifecycle fields.
         const response = await fetch(`/api/data/conversations/${currentConversationId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ duration_minutes: duration })
+          body: JSON.stringify({
+            is_active: false,
+            ended_at: endTime.toISOString(),
+          })
         });
 
         if (!response.ok) {
@@ -404,6 +426,8 @@ export default function Therapist() {
       await endSession();
     }
 
+    await flushCurrentSession();
+
     try {
       const response = await fetch('/api/session/start', {
         method: 'POST',
@@ -427,10 +451,17 @@ export default function Therapist() {
   };
 
   const selectConversation = (conversation: Conversation) => {
+    void flushCurrentSession();
     setCurrentConversationId(conversation.id);
     loadMessages(conversation.id);
     setShowSidebar(false);
   };
+
+  useEffect(() => {
+    return () => {
+      void flushCurrentSession();
+    };
+  }, [flushCurrentSession]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

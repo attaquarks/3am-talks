@@ -34,6 +34,11 @@ class VoiceChatRequest(BaseModel):
     conversation_id: Optional[str] = None
 
 
+class VoiceEndRequest(BaseModel):
+    user_id: str
+    conversation_id: Optional[str] = None
+
+
 @router.post("/api/livekit/token")
 def livekit_token(request: Request):
     """Generate a LiveKit access token for a voice session."""
@@ -136,6 +141,34 @@ async def voice_chat(body: VoiceChatRequest, request: Request):
         "turn": result.get("turn"),
         "personality_scores": result.get("personality_scores"),
         "rag_techniques_used": result.get("rag_techniques_used", 0),
+        "persistence_mode": result.get("metadata", {}).get("persistence_mode"),
+    }
+
+
+@router.post("/api/voice/end")
+def voice_end(body: VoiceEndRequest, request: Request):
+    """Server-to-server endpoint used by the voice worker when a call ends."""
+    require_voice_agent(request)
+    mgr = get_manager()
+
+    _get_profile_persistent(body.user_id)
+    conv_id = body.conversation_id or _resume_or_start_conversation(mgr, body.user_id)
+
+    flush_result = mgr.flush_conversation_buffer(conv_id, reason="voice-end")
+
+    try:
+        mgr.db_client.update(
+            "conversations",
+            {"is_active": False, "ended_at": dt.datetime.utcnow().isoformat()},
+            {"conversation_id": f"eq.{conv_id}", "user_id": f"eq.{body.user_id}"},
+        )
+    except Exception as e:
+        logger.warning(f"Failed to mark conversation inactive on voice end ({conv_id}): {e}")
+
+    return {
+        "conversation_id": conv_id,
+        "flushed": True,
+        "result": flush_result,
     }
     if crisis_payload:
         response["crisis"] = crisis_payload

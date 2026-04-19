@@ -412,7 +412,7 @@ def _resume_or_start_conversation(mgr, user_id: str) -> str:
 
     Preference order:
     1) Active conversation (is_active=true)
-    2) Most recent conversation by created_at
+    2) Most recent conversation by started_at
     3) Create a new conversation
     """
     active = mgr.user_service.get_active_conversation(user_id)
@@ -425,7 +425,11 @@ def _resume_or_start_conversation(mgr, user_id: str) -> str:
             filters={"user_id": f"eq.{user_id}"},
         )
         if convs:
-            convs_sorted = sorted(convs, key=lambda c: (c.get("created_at") or ""), reverse=True)
+            convs_sorted = sorted(
+                convs,
+                key=lambda c: (c.get("started_at") or c.get("created_at") or ""),
+                reverse=True,
+            )
             latest = convs_sorted[0]
             conv_id = latest.get("conversation_id")
             if conv_id:
@@ -479,8 +483,8 @@ def _build_user_metrics_by_user() -> Dict[str, dict]:
         if not uid:
             continue
         conv_counts[uid] = conv_counts.get(uid, 0) + 1
-        conv_minutes[uid] = conv_minutes.get(uid, 0) + int(conv.get("duration_minutes") or 0)
-        created_at = conv.get("created_at")
+        conv_minutes[uid] = conv_minutes.get(uid, 0) + int(_conversation_duration_minutes(conv) or 0)
+        created_at = conv.get("started_at") or conv.get("created_at")
         if created_at and (uid not in conv_last or str(created_at) > str(conv_last[uid])):
             conv_last[uid] = str(created_at)
 
@@ -507,6 +511,9 @@ def _build_user_metrics_by_user() -> Dict[str, dict]:
 
 
 def _backend_conversation_to_frontend(conv: dict) -> dict:
+    started_at = conv.get("started_at") or conv.get("created_at")
+    ended_at = conv.get("ended_at") or conv.get("updated_at")
+
     return {
         "id": conv.get("conversation_id", conv.get("id", "")),
         "user_id": conv.get("user_id", ""),
@@ -514,12 +521,36 @@ def _backend_conversation_to_frontend(conv: dict) -> dict:
         "mood": conv.get("mood", None),
         "summary": conv.get("summary", None),
         "tags": conv.get("tags", None),
-        "duration_minutes": conv.get("duration_minutes", None),
+        "duration_minutes": _conversation_duration_minutes(conv),
         "is_active": conv.get("is_active", True),
         "total_turns": conv.get("total_turns", 0),
-        "created_at": conv.get("created_at", datetime.utcnow().isoformat()),
-        "updated_at": conv.get("updated_at", conv.get("created_at", datetime.utcnow().isoformat())),
+        "created_at": started_at or datetime.utcnow().isoformat(),
+        "updated_at": ended_at or started_at or datetime.utcnow().isoformat(),
     }
+
+
+def _conversation_duration_minutes(conv: dict) -> Optional[int]:
+    explicit = conv.get("duration_minutes")
+    if explicit is not None:
+        try:
+            return int(explicit)
+        except Exception:
+            return None
+
+    started_at = _parse_iso_datetime(conv.get("started_at") or conv.get("created_at"))
+    if not started_at:
+        return None
+
+    ended_at = _parse_iso_datetime(conv.get("ended_at") or conv.get("updated_at"))
+    if not ended_at:
+        return None
+
+    try:
+        delta = ended_at - started_at
+        minutes = int(max(delta.total_seconds(), 0) // 60)
+        return minutes
+    except Exception:
+        return None
 
 
 def _backend_message_to_frontend(msg: dict) -> dict:
