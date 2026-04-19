@@ -70,7 +70,8 @@ counseling system. It provides personalized mental-health support through:
 ┌─────────────────────────────────────────────────────────────────┐
 │              Voice Agent (separate process)                      │
 │   src/voice/agent.py — LiveKit worker (Ella)                    │
-│   Pipeline: Silero VAD → ElevenLabs STT → backend → TTS         │
+│   Pipeline: Silero VAD → ElevenLabs STT → backend                │
+│             → ElevenLabs TTS (primary) with Edge TTS fallback    │
 │   Crisis events from /api/voice/chat are re-published to the    │
 │   LiveKit data channel so the frontend CrisisCountdownModal     │
 │   opens alongside the TTS reply.                                │
@@ -254,7 +255,11 @@ Required environment variables (`.env` in project root):
   are not retried, so caller time budgets (e.g. the 8 s crisis arbiter)
   are respected.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
-- `ELEVEN_API_KEY`
+- `ELEVEN_API_KEY` — powers ElevenLabs STT and primary TTS. If unset, the
+  voice agent skips ElevenLabs entirely and uses Edge TTS alone. If set,
+  ElevenLabs TTS is wrapped in `livekit.agents.tts.FallbackAdapter` with
+  Edge TTS as the fallback, so exhausted credits / auth errors / 5xx
+  transparently fail over mid-session.
 - `VOICE_AGENT_SECRET` — HMAC shared secret between backend and voice agent
 
 Optional:
@@ -268,6 +273,10 @@ Optional:
   `http://localhost:5173`). Used for the OAuth success redirect in
   `src/routes/auth.py`. Set to the Vercel URL in production so Google /
   Facebook sign-in doesn't bounce users back to localhost.
+- `ELEVEN_VOICE_ID` — override the ElevenLabs TTS voice (default Rachel,
+  `l7kNoIfnJKPg7779LI2t`).
+- `EDGE_TTS_VOICE` — override the Edge TTS fallback voice (default
+  `en-US-JennyNeural`).
 
 ---
 

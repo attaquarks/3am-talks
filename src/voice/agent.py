@@ -1,7 +1,8 @@
 """
 3AM Talks — LiveKit Voice Agent (Ella)
 Real-time voice conversation agent using:
-  Pipeline: Silero VAD → ElevenLabs STT → (Backend ConversationManager) → ElevenLabs TTS
+  Pipeline: Silero VAD → ElevenLabs STT → (Backend ConversationManager)
+            → ElevenLabs TTS (primary) with Edge TTS fallback
 
 Runs as a standalone process: python src/voice_agent.py dev
 """
@@ -27,6 +28,7 @@ from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, 
 from livekit.agents.llm import ChatChunk, FunctionTool, ChatContext
 from livekit.agents import ModelSettings
 from livekit.plugins import openai, elevenlabs, silero
+from livekit.agents.tts import FallbackAdapter as TTSFallbackAdapter
 from voice.tts_plugin import TTS as EdgeTTS
 import httpx
 
@@ -216,6 +218,27 @@ async def _bootstrap_conversation(backend_base_url: str, voice_agent_secret: str
         return conv_id
 
 
+def _build_tts():
+    """Build TTS with ElevenLabs primary + Edge TTS fallback.
+
+    If ELEVEN_API_KEY is unset/empty, skip ElevenLabs and use Edge alone.
+    Otherwise wrap both in FallbackAdapter: the adapter retries ElevenLabs
+    max_retry_per_tts times (connection errors / 5xx / auth rejections on
+    exhausted credits) before switching to Edge for the remainder of the
+    utterance.
+    """
+    edge_voice = os.getenv("EDGE_TTS_VOICE", "en-US-JennyNeural")
+    edge_tts = EdgeTTS(voice=edge_voice)
+
+    if not os.getenv("ELEVEN_API_KEY"):
+        logger.warning("ELEVEN_API_KEY not set; using Edge TTS only")
+        return edge_tts
+
+    eleven_voice_id = os.getenv("ELEVEN_VOICE_ID", "l7kNoIfnJKPg7779LI2t")
+    primary = elevenlabs.TTS(voice_id=eleven_voice_id)
+    return TTSFallbackAdapter([primary, edge_tts], max_retry_per_tts=1)
+
+
 def build_session() -> AgentSession:
     """Build an AgentSession with the full voice pipeline."""
     return AgentSession(
@@ -230,9 +253,7 @@ def build_session() -> AgentSession:
         ),
         # LLM is intentionally overridden in Ella.llm_node() to call the backend.
         llm=openai.LLM(model="psychocounsel", base_url="http://localhost", api_key="empty"),
-        tts=EdgeTTS(
-            voice="en-US-JennyNeural",
-        ),
+        tts=_build_tts(),
         allow_interruptions=True,
         min_interruption_duration=0.5,
         min_endpointing_delay=0.5,
