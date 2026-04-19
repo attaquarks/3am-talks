@@ -5,6 +5,7 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://earache-procurer-console.ngrok-free.dev/api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
