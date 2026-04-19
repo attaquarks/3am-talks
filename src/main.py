@@ -44,6 +44,7 @@ from routes import (
     admin_router,
     crisis_router,
     therapist_router,
+    therapist_shared_router,
     voice_router,
 )
 from routes.data import router as data_router
@@ -152,6 +153,7 @@ app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(crisis_router)
 app.include_router(therapist_router)
+app.include_router(therapist_shared_router)
 app.include_router(voice_router)
 app.include_router(data_router)
 

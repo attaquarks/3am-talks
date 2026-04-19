@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -20,10 +20,14 @@ from core import (
     _backend_message_to_frontend,
     _select_optional_table,
     _get_stats_persistent,
+    _parse_pagination,
 )
+from crisis.integration import process_message_with_crisis
+from database.supabase_client import SupabaseClient
 
 logger = logging.getLogger("3am-chat")
 router = APIRouter()
+_sb = SupabaseClient()
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -68,8 +72,13 @@ class QuestionnaireAnswerRequest(BaseModel):
 
 @router.post("/api/chat")
 @limiter.limit("30/minute")
-def chat(body: ChatRequest, request: Request):
-    """Send a message to the AI therapy assistant."""
+async def chat(body: ChatRequest, request: Request):
+    """Send a message to the AI therapy assistant.
+
+    Runs the therapy LLM and crisis detection in parallel. If the message is
+    HIGH/CRITICAL, a `crisis` field is attached to the response so the frontend
+    CrisisCountdownModal can open immediately.
+    """
     user = require_user(request)
     user_id = str(user["id"])
     message = (body.message or "").strip()
@@ -89,16 +98,23 @@ def chat(body: ChatRequest, request: Request):
             conversation_id = conv.get("conversation_id")
 
     try:
-        response_text, extra = mgr.chat(
+        chat_result, crisis_payload = await process_message_with_crisis(
+            mgr=mgr,
+            sb=_sb,
             user_id=user_id,
             conversation_id=conversation_id,
             message=message,
         )
-        return {
-            "response": response_text,
+        response: Dict[str, object] = {
+            "response": chat_result.get("response", "I'm here to listen."),
             "conversation_id": conversation_id,
-            **(extra or {}),
+            "turn": chat_result.get("turn"),
+            "personality_scores": chat_result.get("personality_scores"),
+            "rag_techniques_used": chat_result.get("rag_techniques_used", 0),
         }
+        if crisis_payload:
+            response["crisis"] = crisis_payload
+        return response
     except Exception as e:
         logger.error(f"Chat error for {user_id}: {e}")
         raise HTTPException(status_code=500, detail={"message": "AI service error"})
@@ -122,17 +138,26 @@ def create_conversation(body: CreateConversationRequest, request: Request):
 def get_conversations(request: Request):
     user = require_user(request)
     user_id = str(user["id"])
+    limit, offset = _parse_pagination(request, default_limit=50, max_limit=200)
     try:
         mgr = get_manager()
         rows = mgr.db_client.select(
             "conversations",
-            filters={"user_id": f"eq.{user_id}"},
+            filters={
+                "user_id": f"eq.{user_id}",
+                "order": "updated_at.desc",
+                "limit": str(limit),
+                "offset": str(offset),
+            },
         )
-        rows = sorted(rows, key=lambda c: (c.get("updated_at") or c.get("created_at") or ""), reverse=True)
-        return {"conversations": [_backend_conversation_to_frontend(c) for c in rows]}
+        return {
+            "conversations": [_backend_conversation_to_frontend(c) for c in rows],
+            "limit": limit,
+            "offset": offset,
+        }
     except Exception as e:
         logger.error(f"Get conversations error for {user_id}: {e}")
-        return {"conversations": []}
+        return {"conversations": [], "limit": limit, "offset": offset}
 
 
 @router.get("/api/conversations/active")
@@ -200,6 +225,7 @@ def delete_conversation(body: DeleteConversationRequest, request: Request):
 def get_messages(conversation_id: str, request: Request):
     user = require_user(request)
     user_id = str(user["id"])
+    limit, offset = _parse_pagination(request, default_limit=100, max_limit=500)
     try:
         mgr = get_manager()
         # Assert ownership
@@ -211,15 +237,23 @@ def get_messages(conversation_id: str, request: Request):
             raise HTTPException(status_code=404, detail={"message": "Conversation not found"})
         msgs = mgr.db_client.select(
             "messages",
-            filters={"conversation_id": f"eq.{conversation_id}"},
+            filters={
+                "conversation_id": f"eq.{conversation_id}",
+                "order": "created_at.asc",
+                "limit": str(limit),
+                "offset": str(offset),
+            },
         )
-        msgs = sorted(msgs, key=lambda m: (m.get("created_at") or ""))
-        return {"messages": [_backend_message_to_frontend(m) for m in msgs]}
+        return {
+            "messages": [_backend_message_to_frontend(m) for m in msgs],
+            "limit": limit,
+            "offset": offset,
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Get messages error: {e}")
-        return {"messages": []}
+        return {"messages": [], "limit": limit, "offset": offset}
 
 
 @router.post("/api/end-session")

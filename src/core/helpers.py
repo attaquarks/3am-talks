@@ -265,6 +265,26 @@ def _select_optional_table(table: str, filters: Optional[dict] = None) -> List[d
         raise
 
 
+def _parse_pagination(
+    request: Request,
+    default_limit: int = 50,
+    max_limit: int = 200,
+) -> tuple[int, int]:
+    """Parse `?limit=N&offset=N` query params. Clamps limit to [1, max_limit]
+    and offset to >= 0. Returns (limit, offset) with safe defaults."""
+    try:
+        limit = int(request.query_params.get("limit", default_limit))
+    except (TypeError, ValueError):
+        limit = default_limit
+    try:
+        offset = int(request.query_params.get("offset", 0))
+    except (TypeError, ValueError):
+        offset = 0
+    limit = max(1, min(limit, max_limit))
+    offset = max(0, offset)
+    return limit, offset
+
+
 # ---------------------------------------------------------------------------
 # Admin helpers
 # ---------------------------------------------------------------------------

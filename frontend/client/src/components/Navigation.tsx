@@ -33,6 +33,7 @@ function useNavItems(): NavItem[] {
     { path: "/dashboard", icon: Home, label: "Dashboard" },
     { path: "/chat", icon: MessageCircle, label: "ELLA" },
     { path: "/my-therapists", icon: HeartHandshake, label: "Therapists" },
+    { path: "/my-therapists/messages", icon: Inbox, label: "Messages" },
     { path: "/safety", icon: ShieldAlert, label: "Safety" },
     { path: "/history", icon: Calendar, label: "History" },
     { path: "/profile", icon: User, label: "Profile" },
@@ -70,8 +71,11 @@ export function Navigation() {
               <Wind className="absolute text-primary/40 group-hover:rotate-12 transition-all" size={24} strokeWidth={1.5} />
               <Sparkles className="absolute text-accent/60 -top-0.5 -right-0.5 animate-pulse" size={12} />
             </div>
-            <span className="text-xl font-light tracking-[0.2em] uppercase">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+            <span className="flex flex-col leading-tight">
+              <span className="text-xl font-light tracking-[0.2em] uppercase">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-accent">Ella AI</span>
+              </span>
+              <span className="text-[8px] uppercase tracking-[0.3em] text-muted-foreground/70">by 3AM Talks</span>
             </span>
           </Link>
 

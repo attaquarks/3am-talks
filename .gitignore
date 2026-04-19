@@ -48,3 +48,7 @@ dist/
 
 # Local audit artifacts (not reviewed into source)
 AUDIT REPORTS/
+
+# Local crisis-detector evaluation data (real chat logs — not for the repo)
+data.txt
+crisis_flow_results.md

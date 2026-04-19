@@ -24,7 +24,7 @@ create index if not exists idx_mood_entries_user_date
 
 -- Conversations: user lookup ordered by time
 create index if not exists idx_conversations_user_date
-  on conversations(user_id, created_at desc);
+  on conversations(user_id, started_at desc);
 
 -- Messages: conversation lookup ordered by time
 create index if not exists idx_messages_conversation_date
@@ -37,7 +37,7 @@ create index if not exists idx_therapist_messages_unread
 
 -- Clinical access logs: patient audit trail
 create index if not exists idx_access_logs_patient
-  on clinical_access_logs(patient_id, accessed_at desc);
+  on clinical_access_logs(patient_id, created_at desc);
 
 -- Emergency contacts: active contacts per user (alert dispatch)
 create index if not exists idx_emergency_contacts_active
