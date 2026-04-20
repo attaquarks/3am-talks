@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -5,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 
 # Import all components
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,8 +14,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ai_layer.llm_service import LLMService
 from ai_layer.personality_service import PersonalityService
 from conversation.questionnaire import PersonalityQuestionnaire
+from conversation.state import ConversationState, render_state_for_prompt
 from database import SupabaseClient, UserService
 from rag_layer import RAGService
+from voice.backchannel import is_backchannel
+from voice.sentence_buffer import SentenceChunker
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +104,18 @@ class ConversationManager:
         # Buffering state
         self._state_guard = threading.RLock()
         self._conversation_locks: Dict[str, threading.Lock] = {}
+        # Distinct from _conversation_locks (which guards buffer mutations).
+        # _turn_locks serializes full turn processing per conversation so that
+        # two overlapping voice utterances cannot race through process_message
+        # and corrupt history/personality state. Acquisition order is always
+        # _state_guard → _turn_locks[cid] → _conversation_locks[cid]; the
+        # flush thread only takes _conversation_locks[cid], so no inversion.
+        self._turn_locks: Dict[str, threading.Lock] = {}
         self._buffer_states: Dict[str, _ConversationBufferState] = {}
+        # In-memory conversation state snapshots (topic, mood, goal, summary).
+        # Updated by a non-blocking background task every N turns from
+        # crisis.integration.process_message_with_crisis. Lost on restart.
+        self._conv_states: Dict[str, ConversationState] = {}
         self._flush_stop_event = threading.Event()
         self._flush_thread: Optional[threading.Thread] = None
 
@@ -127,6 +142,10 @@ class ConversationManager:
                     self.flush_due_buffers(reason="periodic")
                 except Exception as exc:
                     logger.warning("Periodic flush loop error: %s", exc)
+                try:
+                    self._evict_stale_in_memory_state()
+                except Exception as exc:
+                    logger.warning("Stale-state eviction error: %s", exc)
 
         self._flush_thread = threading.Thread(
             target=_run,
@@ -135,6 +154,46 @@ class ConversationManager:
         )
         self._flush_thread.start()
 
+    # Caps for the per-process in-memory dicts so long-running servers don't
+    # grow unbounded. Evicted entries are safely rebuilt on the next turn
+    # (ConversationState refreshes itself every N turns; locks are lazy).
+    _MAX_CONV_STATES = 2000
+    _MAX_LOCK_ENTRIES = 2000
+    _LOCK_IDLE_SECONDS = 3600  # 1h
+
+    def _evict_stale_in_memory_state(self) -> None:
+        """Trim `_conv_states`, `_turn_locks`, `_conversation_locks` when
+        they grow too large. Keeps entries that have active buffered state.
+        """
+        now = time.time()
+        with self._state_guard:
+            # Conversation states — evict oldest by last_updated_at.
+            if len(self._conv_states) > self._MAX_CONV_STATES:
+                overflow = len(self._conv_states) - self._MAX_CONV_STATES
+                by_age = sorted(
+                    self._conv_states.items(),
+                    key=lambda kv: getattr(kv[1], "last_updated_at", 0.0),
+                )
+                for cid, _ in by_age[:overflow]:
+                    self._conv_states.pop(cid, None)
+
+            # Locks — evict only if conversation has no buffered state AND
+            # recent activity is older than the idle threshold.
+            active = set(self._buffer_states.keys())
+            for lock_dict in (self._turn_locks, self._conversation_locks):
+                if len(lock_dict) <= self._MAX_LOCK_ENTRIES:
+                    continue
+                candidates = []
+                for cid in list(lock_dict.keys()):
+                    if cid in active:
+                        continue
+                    state = self._conv_states.get(cid)
+                    last_touch = getattr(state, "last_updated_at", 0.0) if state else 0.0
+                    if now - last_touch > self._LOCK_IDLE_SECONDS:
+                        candidates.append(cid)
+                for cid in candidates[: len(lock_dict) - self._MAX_LOCK_ENTRIES]:
+                    lock_dict.pop(cid, None)
+
     def _get_conversation_lock(self, conversation_id: str) -> threading.Lock:
         with self._state_guard:
             lock = self._conversation_locks.get(conversation_id)
@@ -142,6 +201,26 @@ class ConversationManager:
                 lock = threading.Lock()
                 self._conversation_locks[conversation_id] = lock
             return lock
+
+    def _get_turn_lock(self, conversation_id: str) -> threading.Lock:
+        with self._state_guard:
+            lock = self._turn_locks.get(conversation_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._turn_locks[conversation_id] = lock
+            return lock
+
+    def get_conversation_state(self, conversation_id: str) -> Optional[ConversationState]:
+        """Read the current in-memory state snapshot (may be None)."""
+        with self._state_guard:
+            return self._conv_states.get(conversation_id)
+
+    def set_conversation_state(
+        self, conversation_id: str, state: ConversationState
+    ) -> None:
+        """Replace the in-memory state snapshot for a conversation."""
+        with self._state_guard:
+            self._conv_states[conversation_id] = state
 
     def _get_or_create_buffer_state(self, conversation_id: str) -> _ConversationBufferState:
         with self._state_guard:
@@ -557,13 +636,22 @@ class ConversationManager:
         total_turns_before_current: Optional[int] = None,
         current_user_message: Optional[str] = None,
         force_update: bool = False,
+        *,
+        conversation: Optional[dict] = None,
+        profile: Optional[dict] = None,
     ) -> Optional[Dict[str, float]]:
-        """Update personality profile if enough turns have passed."""
+        """Update personality profile if enough turns have passed.
+
+        `conversation` and `profile` can be passed in by the caller to avoid
+        redundant DB fetches — process_message already fetched both by the
+        time this is called. When omitted we fall back to fetching.
+        """
         if not self.enable_personality:
             return None
 
         try:
-            conversation = self.user_service.get_conversation(conversation_id)
+            if conversation is None:
+                conversation = self.user_service.get_conversation(conversation_id)
             if not conversation:
                 return None
 
@@ -580,13 +668,15 @@ class ConversationManager:
             ) >= self.personality_update_interval
 
             if not should_update:
-                profile = self.user_service.get_user_profile(user_id) or {}
+                cached = profile if profile is not None else (
+                    self.user_service.get_user_profile(user_id) or {}
+                )
                 return {
-                    "Extroversion": profile.get("extroversion", 0.5),
-                    "Neuroticism": profile.get("neuroticism", 0.5),
-                    "Agreeableness": profile.get("agreeableness", 0.5),
-                    "Conscientiousness": profile.get("conscientiousness", 0.5),
-                    "Openness": profile.get("openness", 0.5),
+                    "Extroversion": cached.get("extroversion", 0.5),
+                    "Neuroticism": cached.get("neuroticism", 0.5),
+                    "Agreeableness": cached.get("agreeableness", 0.5),
+                    "Conscientiousness": cached.get("conscientiousness", 0.5),
+                    "Openness": cached.get("openness", 0.5),
                 }
 
             user_text = self._get_recent_user_text_for_personality(
@@ -646,87 +736,135 @@ class ConversationManager:
         Returns:
             dict with response and metadata
         """
+        turn_lock = self._get_turn_lock(conversation_id)
+        turn_lock.acquire()
         try:
-            _t0 = time.perf_counter()
+            prep = self._prepare_turn(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                is_questionnaire_response=is_questionnaire_response,
+            )
+            if prep.get("early_return") is not None:
+                return prep["early_return"]
+
+            _ts = time.perf_counter()
+            llm_response = self._generate_llm_response(
+                user_message=prep["user_message"],
+                context_updates=prep["context_updates"],
+                history=prep["history"],
+            )
             logger.info(
-                "[LATENCY] process_message START user=%s conv=%s mode=%s",
-                user_id,
-                conversation_id,
-                self.persistence_mode,
+                "[LATENCY] LLM generate_response took %.3fs",
+                time.perf_counter() - _ts,
             )
 
-            _ts = time.perf_counter()
-            conversation = self.user_service.get_conversation(conversation_id)
-            logger.info("[LATENCY] get_conversation took %.3fs", time.perf_counter() - _ts)
-            if not conversation:
-                raise ValueError(f"Conversation {conversation_id} not found")
+            assistant_message = llm_response.get("Response", "I'm here to listen.")
+            return self._finalize_turn(
+                prep,
+                assistant_message=assistant_message,
+                llm_response=llm_response,
+            )
+        except Exception as e:
+            logger.error("Error processing message: %s", e)
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+        finally:
+            turn_lock.release()
 
-            persisted_turns = int(conversation.get("total_turns", 0) or 0)
-            pending_turns = self._get_pending_turns(conversation_id)
-            total_turns_before_current = persisted_turns + pending_turns
-            current_turn = total_turns_before_current + 1
+    def _prepare_turn(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        user_message: str,
+        is_questionnaire_response: bool = False,
+    ) -> dict:
+        """Run DB fetches, personality, RAG, context, history — everything
+        needed to call the LLM. Returns a dict consumed by `_finalize_turn`.
 
-            _ts = time.perf_counter()
-            profile = self.user_service.get_user_profile(user_id)
-            logger.info("[LATENCY] get_user_profile took %.3fs", time.perf_counter() - _ts)
-            if not profile:
-                raise ValueError(f"User profile {user_id} not found")
+        If the message is a questionnaire response, the dict contains an
+        `early_return` key holding the final response (questionnaire path
+        does not touch the LLM).
+        """
+        _t0 = time.perf_counter()
+        logger.info(
+            "[LATENCY] process_message START user=%s conv=%s mode=%s",
+            user_id,
+            conversation_id,
+            self.persistence_mode,
+        )
 
-            questionnaire = self.questionnaires.get(user_id)
+        _ts = time.perf_counter()
+        conversation = self.user_service.get_conversation(conversation_id)
+        logger.info("[LATENCY] get_conversation took %.3fs", time.perf_counter() - _ts)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
 
-            if is_questionnaire_response and questionnaire and not questionnaire.completed:
-                current_question = questionnaire.get_next_question()
-                if current_question:
-                    try:
-                        self.db_client.insert(
-                            "questionnaire_responses",
-                            {
-                                "user_id": user_id,
-                                "question": current_question["question"],
-                                "response": user_message,
-                            },
+        persisted_turns = int(conversation.get("total_turns", 0) or 0)
+        pending_turns = self._get_pending_turns(conversation_id)
+        total_turns_before_current = persisted_turns + pending_turns
+        current_turn = total_turns_before_current + 1
+
+        _ts = time.perf_counter()
+        profile = self.user_service.get_user_profile(user_id)
+        logger.info("[LATENCY] get_user_profile took %.3fs", time.perf_counter() - _ts)
+        if not profile:
+            raise ValueError(f"User profile {user_id} not found")
+
+        questionnaire = self.questionnaires.get(user_id)
+
+        if is_questionnaire_response and questionnaire and not questionnaire.completed:
+            current_question = questionnaire.get_next_question()
+            if current_question:
+                try:
+                    self.db_client.insert(
+                        "questionnaire_responses",
+                        {
+                            "user_id": user_id,
+                            "question": current_question["question"],
+                            "response": user_message,
+                        },
+                    )
+                except Exception as e:
+                    logger.error("Failed to save response to database: %s", e)
+
+                questionnaire.submit_response(current_question["id"], user_message)
+
+                if questionnaire.completed:
+                    questionnaire_text = questionnaire.get_all_responses_text()
+                    personality_scores_q = None
+                    if self.enable_personality and self.personality_detector:
+                        personality_scores_q = self.personality_detector.detect_personality(
+                            questionnaire_text
                         )
-                    except Exception as e:
-                        logger.error("Failed to save response to database: %s", e)
-
-                    questionnaire.submit_response(current_question["id"], user_message)
-
-                    if questionnaire.completed:
-                        questionnaire_text = questionnaire.get_all_responses_text()
-
-                        personality_scores = None
-                        if self.enable_personality and self.personality_detector:
-                            personality_scores = self.personality_detector.detect_personality(
-                                questionnaire_text
-                            )
-                            self.user_service.update_personality_scores(
-                                user_id,
-                                personality_scores,
-                                len(questionnaire_text),
-                            )
-                            logger.info(
-                                "Initial personality assessed from questionnaire for user %s",
-                                user_id,
-                            )
-
-                        self.user_service.mark_questionnaire_completed(
+                        self.user_service.update_personality_scores(
                             user_id,
-                            completed=True,
+                            personality_scores_q,
+                            len(questionnaire_text),
                         )
-
-                        return {
+                        logger.info(
+                            "Initial personality assessed from questionnaire for user %s",
+                            user_id,
+                        )
+                    self.user_service.mark_questionnaire_completed(user_id, completed=True)
+                    return {
+                        "early_return": {
                             "response": "Thank you for completing the initial assessment. I now have a better understanding of you, and we can continue our conversation.",
                             "turn": current_turn,
                             "questionnaire": {
                                 "completed": True,
                                 "message": "Thank you for completing the initial assessment. I now have a better understanding of you, and we can continue our conversation.",
                             },
-                            "personality_scores": personality_scores,
+                            "personality_scores": personality_scores_q,
                         }
+                    }
 
-                    next_question = questionnaire.get_next_question()
-                    if next_question:
-                        return {
+                next_question = questionnaire.get_next_question()
+                if next_question:
+                    return {
+                        "early_return": {
                             "response": f"Thank you for sharing that. {next_question['question']}",
                             "turn": current_turn,
                             "questionnaire": {
@@ -736,194 +874,285 @@ class ConversationManager:
                             },
                             "personality_scores": None,
                         }
+                    }
 
-            if not self.buffered_persistence:
-                _ts = time.perf_counter()
-                self.user_service.add_message(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    role="user",
-                    content=user_message,
-                    turn_index=current_turn,
-                )
-                logger.info(
-                    "[LATENCY] add_message (user) took %.3fs",
-                    time.perf_counter() - _ts,
-                )
-            else:
-                logger.info(
-                    "[LATENCY] add_message (user) skipped in buffered mode conv=%s",
-                    conversation_id,
-                )
-
+        if not self.buffered_persistence:
             _ts = time.perf_counter()
-            personality_scores = self._update_personality_if_needed(
-                user_id,
+            self.user_service.add_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role="user",
+                content=user_message,
+                turn_index=current_turn,
+            )
+            logger.info(
+                "[LATENCY] add_message (user) took %.3fs",
+                time.perf_counter() - _ts,
+            )
+        else:
+            logger.info(
+                "[LATENCY] add_message (user) skipped in buffered mode conv=%s",
                 conversation_id,
-                total_turns_before_current=total_turns_before_current,
-                current_user_message=user_message,
-                force_update=False,
-            )
-            logger.info(
-                "[LATENCY] _update_personality_if_needed took %.3fs",
-                time.perf_counter() - _ts,
             )
 
-            rag_context = None
-            rag_techniques_metadata = []
+        _ts = time.perf_counter()
+        personality_scores = self._update_personality_if_needed(
+            user_id,
+            conversation_id,
+            total_turns_before_current=total_turns_before_current,
+            current_user_message=user_message,
+            force_update=False,
+            conversation=conversation,
+            profile=profile,
+        )
+        logger.info(
+            "[LATENCY] _update_personality_if_needed took %.3fs",
+            time.perf_counter() - _ts,
+        )
 
-            if self.enable_rag and self.rag_service:
-                try:
-                    _ts = time.perf_counter()
-                    issue_tags = self._infer_issue_tags(user_message)
-                    techniques = self.rag_service.retrieve_relevant_techniques(
-                        query=user_message,
-                        issue_tags=issue_tags,
-                        top_k=3,
-                    )
+        rag_context = None
+        rag_techniques_metadata: List[dict] = []
 
-                    rag_context = self.rag_service.format_techniques_for_prompt(techniques)
+        # Gate RAG: skip for short / backchannel utterances. The crisis
+        # detector runs in a separate coroutine and is NOT affected.
+        should_run_rag = (
+            self.enable_rag
+            and self.rag_service
+            and len(user_message.split()) >= 4
+            and not is_backchannel(user_message)
+        )
 
-                    rag_techniques_metadata = [
-                        {
-                            "id": t.get("id"),
-                            "technique_name": t.get("metadata", {}).get(
-                                "technique_name"
-                            ),
-                            "score": t.get("score"),
-                        }
-                        for t in techniques
-                    ]
-                    logger.info(
-                        "[LATENCY] RAG retrieval (%s techniques) took %.3fs",
-                        len(techniques),
-                        time.perf_counter() - _ts,
-                    )
-                except Exception as e:
-                    logger.error("RAG retrieval failed: %s", e)
-                    rag_context = None
-
-            _ts = time.perf_counter()
-            context_updates = self._build_context_updates(
-                personality_scores,
-                rag_context,
-                current_turn,
-                profile,
-            )
-            logger.info(
-                "[LATENCY] _build_context_updates took %.3fs",
-                time.perf_counter() - _ts,
-            )
-
-            _ts = time.perf_counter()
-            if self.buffered_persistence:
-                history_messages = self._get_history_with_buffer(conversation_id, limit=10)
-            else:
-                history_messages = self.user_service.get_conversation_history(
-                    conversation_id,
-                    limit=10,
-                )
-            logger.info(
-                "[LATENCY] get_conversation_history took %.3fs",
-                time.perf_counter() - _ts,
-            )
-
-            history: List[dict] = []
-            if self.buffered_persistence:
-                for msg in history_messages:
-                    history.append(
-                        {
-                            "role": msg.get("role"),
-                            "content": msg.get("content"),
-                        }
-                    )
-            else:
-                for msg in history_messages[:-1]:
-                    history.append(
-                        {
-                            "role": msg.get("role"),
-                            "content": msg.get("content"),
-                        }
-                    )
-
-            _ts = time.perf_counter()
-            llm_response = self._generate_llm_response(
-                user_message=user_message,
-                context_updates=context_updates,
-                history=history,
-            )
-            logger.info(
-                "[LATENCY] LLM generate_response took %.3fs",
-                time.perf_counter() - _ts,
-            )
-
-            assistant_message = llm_response.get("Response", "I'm here to listen.")
-
-            _ts = time.perf_counter()
-            if self.buffered_persistence:
-                pending_turns_after_enqueue = self._enqueue_turn_messages(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    turn_index=current_turn,
-                    user_message=user_message,
-                    assistant_message=assistant_message,
-                    personality_scores=personality_scores,
-                    rag_techniques=rag_techniques_metadata if rag_techniques_metadata else None,
-                )
-                logger.info(
-                    "[LATENCY] enqueue_turn_messages took %.3fs (pending_turns=%s)",
-                    time.perf_counter() - _ts,
-                    pending_turns_after_enqueue,
-                )
-            else:
-                self.user_service.add_message(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    role="assistant",
-                    content=assistant_message,
-                    turn_index=current_turn,
-                    personality_scores=personality_scores,
-                    rag_techniques=rag_techniques_metadata if rag_techniques_metadata else None,
-                )
-                logger.info(
-                    "[LATENCY] add_message (assistant) took %.3fs",
-                    time.perf_counter() - _ts,
-                )
-
+        if should_run_rag:
+            try:
                 _ts = time.perf_counter()
-                self.user_service.update_conversation_turns(
-                    conversation_id,
-                    increment=1,
-                    touch_updated_at=True,
+                issue_tags = self._infer_issue_tags(user_message)
+                techniques = self.rag_service.retrieve_relevant_techniques(
+                    query=user_message,
+                    issue_tags=issue_tags,
+                    top_k=3,
                 )
+                rag_context = self.rag_service.format_techniques_for_prompt(techniques)
+                rag_techniques_metadata = [
+                    {
+                        "id": t.get("id"),
+                        "technique_name": t.get("metadata", {}).get("technique_name"),
+                        "score": t.get("score"),
+                    }
+                    for t in techniques
+                ]
                 logger.info(
-                    "[LATENCY] update_conversation_turns took %.3fs",
+                    "[LATENCY] RAG retrieval (%s techniques) took %.3fs",
+                    len(techniques),
                     time.perf_counter() - _ts,
                 )
+            except Exception as e:
+                logger.error("RAG retrieval failed: %s", e)
+                rag_context = None
 
+        _ts = time.perf_counter()
+        context_updates = self._build_context_updates(
+            personality_scores,
+            rag_context,
+            current_turn,
+            profile,
+            conversation_id=conversation_id,
+        )
+        logger.info(
+            "[LATENCY] _build_context_updates took %.3fs",
+            time.perf_counter() - _ts,
+        )
+
+        _ts = time.perf_counter()
+        if self.buffered_persistence:
+            history_messages = self._get_history_with_buffer(conversation_id, limit=10)
+        else:
+            history_messages = self.user_service.get_conversation_history(
+                conversation_id,
+                limit=10,
+            )
+        logger.info(
+            "[LATENCY] get_conversation_history took %.3fs",
+            time.perf_counter() - _ts,
+        )
+
+        history: List[dict] = []
+        if self.buffered_persistence:
+            for msg in history_messages:
+                history.append({"role": msg.get("role"), "content": msg.get("content")})
+        else:
+            for msg in history_messages[:-1]:
+                history.append({"role": msg.get("role"), "content": msg.get("content")})
+
+        return {
+            "early_return": None,
+            "t0": _t0,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "user_message": user_message,
+            "current_turn": current_turn,
+            "conversation": conversation,
+            "profile": profile,
+            "personality_scores": personality_scores,
+            "rag_context": rag_context,
+            "rag_techniques_metadata": rag_techniques_metadata,
+            "context_updates": context_updates,
+            "history": history,
+        }
+
+    def _finalize_turn(
+        self,
+        prep: dict,
+        assistant_message: str,
+        *,
+        llm_response: Optional[dict] = None,
+    ) -> dict:
+        """Persist (or enqueue) the turn and return the final response dict.
+
+        Safe to call with a partial assistant_message (e.g. after a voice
+        interrupt) — the message is stored as-is so history stays coherent.
+        """
+        user_id = prep["user_id"]
+        conversation_id = prep["conversation_id"]
+        user_message = prep["user_message"]
+        current_turn = prep["current_turn"]
+        personality_scores = prep.get("personality_scores")
+        rag_techniques_metadata = prep.get("rag_techniques_metadata") or []
+        _t0 = prep.get("t0") or time.perf_counter()
+
+        assistant_message = (assistant_message or "").strip() or "I'm here to listen."
+
+        _ts = time.perf_counter()
+        if self.buffered_persistence:
+            pending_turns_after_enqueue = self._enqueue_turn_messages(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                turn_index=current_turn,
+                user_message=user_message,
+                assistant_message=assistant_message,
+                personality_scores=personality_scores,
+                rag_techniques=rag_techniques_metadata if rag_techniques_metadata else None,
+            )
             logger.info(
-                "[LATENCY] process_message TOTAL took %.3fs",
-                time.perf_counter() - _t0,
+                "[LATENCY] enqueue_turn_messages took %.3fs (pending_turns=%s)",
+                time.perf_counter() - _ts,
+                pending_turns_after_enqueue,
+            )
+        else:
+            self.user_service.add_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role="assistant",
+                content=assistant_message,
+                turn_index=current_turn,
+                personality_scores=personality_scores,
+                rag_techniques=rag_techniques_metadata if rag_techniques_metadata else None,
+            )
+            logger.info(
+                "[LATENCY] add_message (assistant) took %.3fs",
+                time.perf_counter() - _ts,
             )
 
-            return {
-                "response": assistant_message,
-                "turn": current_turn,
-                "personality_scores": personality_scores,
-                "rag_techniques_used": len(rag_techniques_metadata),
-                "metadata": {
-                    "llm_raw_response": llm_response,
-                    "rag_techniques": rag_techniques_metadata,
-                    "persistence_mode": self.persistence_mode,
-                },
-            }
+            _ts = time.perf_counter()
+            self.user_service.update_conversation_turns(
+                conversation_id,
+                increment=1,
+                touch_updated_at=True,
+            )
+            logger.info(
+                "[LATENCY] update_conversation_turns took %.3fs",
+                time.perf_counter() - _ts,
+            )
 
+        logger.info(
+            "[LATENCY] process_message TOTAL took %.3fs",
+            time.perf_counter() - _t0,
+        )
+
+        return {
+            "response": assistant_message,
+            "turn": current_turn,
+            "personality_scores": personality_scores,
+            "rag_techniques_used": len(rag_techniques_metadata),
+            "metadata": {
+                "llm_raw_response": llm_response,
+                "rag_techniques": rag_techniques_metadata,
+                "persistence_mode": self.persistence_mode,
+            },
+        }
+
+    async def process_message_streaming(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        user_message: str,
+    ) -> AsyncIterator[dict]:
+        """Async generator that streams a turn as sentence-level events.
+
+        Yields dicts of shape {"type": "sentence"|"final", "data": {...}}.
+        The turn lock is held across the whole generator so overlapping
+        voice utterances cannot race. If the consumer cancels mid-stream
+        (e.g. user interrupted), whatever partial text we have is still
+        persisted so the next turn's history stays coherent.
+        """
+        turn_lock = self._get_turn_lock(conversation_id)
+        await asyncio.to_thread(turn_lock.acquire)
+        prep: Optional[dict] = None
+        full_text = ""
+        try:
+            prep = await asyncio.to_thread(
+                self._prepare_turn,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                is_questionnaire_response=False,
+            )
+            if prep.get("early_return") is not None:
+                er = prep["early_return"]
+                if er.get("response"):
+                    yield {"type": "sentence", "data": {"text": er["response"]}}
+                yield {"type": "final", "data": er}
+                return
+
+            chunker = SentenceChunker()
+            try:
+                async for delta in self.llm.generate_response_streaming(
+                    patient_utterance=prep["user_message"],
+                    history=prep["history"],
+                    context_updates=prep["context_updates"],
+                ):
+                    full_text += delta
+                    for sentence in chunker.push(delta):
+                        yield {"type": "sentence", "data": {"text": sentence}}
+                for sentence in chunker.flush():
+                    yield {"type": "sentence", "data": {"text": sentence}}
+            except (asyncio.CancelledError, GeneratorExit):
+                # Consumer went away (e.g. user barged in). Persist partial
+                # text, re-raise so the outer task sees cancellation.
+                if prep is not None:
+                    try:
+                        await asyncio.to_thread(
+                            self._finalize_turn,
+                            prep,
+                            full_text.strip(),
+                        )
+                    except Exception as exc:
+                        logger.warning("partial-persist failed: %s", exc)
+                raise
+
+            final = await asyncio.to_thread(
+                self._finalize_turn,
+                prep,
+                full_text.strip(),
+            )
+            yield {"type": "final", "data": final}
         except Exception as e:
-            logger.error("Error processing message: %s", e)
+            logger.error("Error in process_message_streaming: %s", e)
             import traceback
-
             logger.error(traceback.format_exc())
-            raise
+            yield {"type": "error", "data": {"message": str(e)}}
+        finally:
+            turn_lock.release()
 
     # ==================== HELPER METHODS ====================
 
@@ -966,12 +1195,22 @@ class ConversationManager:
         rag_context: Optional[str],
         current_turn: int,
         user_profile: Dict,
+        conversation_id: Optional[str] = None,
     ) -> str:
         """
-        Build dynamic context updates (Personality + RAG + Onboarding)
+        Build dynamic context updates (State + Personality + RAG + Onboarding)
         to be appended to the LLM's base persona.
         """
         updates = []
+
+        # Prepend the rolling conversation state first so the model treats it
+        # as the anchor for coherence rather than an afterthought.
+        if conversation_id:
+            state_block = render_state_for_prompt(
+                self.get_conversation_state(conversation_id)
+            )
+            if state_block:
+                updates.append(state_block)
 
         is_new_user = user_profile.get("total_text_analyzed", 0) < 100
 

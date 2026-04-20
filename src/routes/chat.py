@@ -107,7 +107,7 @@ async def chat(body: ChatRequest, request: Request):
             sb=_sb,
             user_id=user_id,
             conversation_id=conversation_id,
-            user_message=message,
+            message=message,
         )
         response: Dict[str, object] = {
             "response": chat_result.get("response", "I'm here to listen."),

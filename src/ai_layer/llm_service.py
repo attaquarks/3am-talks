@@ -2,7 +2,7 @@ import json
 import httpx
 import logging
 import os
-from typing import Dict, Optional, List
+from typing import AsyncIterator, Dict, Optional, List
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -192,3 +192,111 @@ Remember: You're having a real conversation. Be natural, be human, be caring.
                 "Response": "I encountered an error. Please try again.",
                 "error": str(e),
             }
+
+    def _construct_streaming_prompt(
+        self, patient_utterance: str, context_updates: Optional[str] = None
+    ) -> Dict:
+        """Variant of _construct_prompt that asks for plain-text output.
+
+        The non-streaming path uses `response_format=json_object`, but
+        JSON-mode is incompatible with token-level streaming — we need the
+        raw reply one delta at a time. We keep the persona/context identical
+        and only swap the user-task instructions so the model does not wrap
+        the response in `{"Response": "..."}`.
+        """
+        full_system_prompt = f"{self.SYSTEM_PERSONA}\n\n{self.SYSTEM_CONCEPTS}"
+        if context_updates:
+            full_system_prompt += (
+                f"\n\n--- CURRENT SESSION CONTEXT ---\n{context_updates}"
+            )
+
+        user_task_instructions = f"""Respond as Ella to the person below.
+
+Here is the person's message:
+"{patient_utterance}"
+
+Guidelines for your response:
+- Try to reflect the patient's mind and normalize his situation rather than providing a solution.
+- Respond naturally, as if talking to a friend who trusts you.
+- Use 2-4 sentences typically or more if needed — enough to show you're engaged and thoughtful.
+- If they're sharing something difficult, acknowledge it genuinely before anything else.
+- Ask thoughtful follow-up questions that feel natural to the conversation.
+- Don't try to solve everything — sometimes listening is enough.
+- Match their emotional tone and energy.
+
+IMPORTANT OUTPUT RULES:
+- Return plain text only. Do NOT wrap in JSON. Do NOT prefix with "Response:".
+- No markdown, no quotes around your reply — just the spoken words.
+"""
+        return {"system": full_system_prompt, "user": user_task_instructions}
+
+    async def generate_response_streaming(
+        self,
+        patient_utterance: str,
+        history: Optional[List[Dict]] = None,
+        context_updates: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """Yield incremental content deltas from the OpenAI-compatible LLM.
+
+        Designed for the voice agent's streaming path so TTS can start
+        speaking before the full reply is generated. Never raises — a caller
+        that gets an empty iterator should fall back gracefully.
+        """
+        if not self.colab_api_url:
+            logger.error("generate_response_streaming: COLAB_API_URL not configured")
+            return
+
+        prompt_parts = self._construct_streaming_prompt(patient_utterance, context_updates)
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": prompt_parts["system"]},
+        ]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt_parts["user"]})
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": True,
+            "temperature": 0.7,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+                async with client.stream(
+                    "POST", self.colab_api_url, json=payload, headers=headers
+                ) as resp:
+                    resp.raise_for_status()
+                    async for raw_line in resp.aiter_lines():
+                        if not raw_line:
+                            continue
+                        line = raw_line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].strip()
+                        if not data_str or data_str == "[DONE]":
+                            if data_str == "[DONE]":
+                                break
+                            continue
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        try:
+                            delta = (
+                                chunk.get("choices", [{}])[0]
+                                .get("delta", {})
+                                .get("content")
+                            )
+                        except Exception:
+                            delta = None
+                        if delta:
+                            yield delta
+        except httpx.HTTPError as exc:
+            logger.error(f"generate_response_streaming HTTP error: {exc}")
+        except Exception as exc:
+            logger.error(f"generate_response_streaming unexpected error: {exc}")

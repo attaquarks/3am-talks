@@ -1,10 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import "@livekit/components-styles";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
   useVoiceAssistant,
   useLocalParticipant,
+  useDataChannel,
   BarVisualizer,
   DisconnectButton,
 } from "@livekit/components-react";
@@ -13,12 +14,38 @@ import { Phone, PhoneOff, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useVoiceCall } from "@/hooks/useVoiceCall";
+import { CrisisCountdownModal } from "@/components/CrisisCountdownModal";
 
 // ---------------------------------------------------------------------------
 // Inner component — must be rendered inside <LiveKitRoom>
 // ---------------------------------------------------------------------------
 
-function VoiceAssistantVisualizer() {
+// Bridges the LiveKit data channel into React state. Mounted inside
+// <LiveKitRoom> so it can use the room context hooks.
+interface VoiceDataBridgeProps {
+  onCrisisCountdown: (seconds: number) => void;
+  onAgentState?: (state: string) => void;
+}
+
+function VoiceDataBridge({ onCrisisCountdown, onAgentState }: VoiceDataBridgeProps) {
+  useDataChannel((msg) => {
+    try {
+      const text = new TextDecoder().decode(msg.payload);
+      const payload = JSON.parse(text);
+      if (payload?.type === "crisis.countdown.start") {
+        const seconds = payload?.countdown?.seconds ?? 30;
+        onCrisisCountdown(typeof seconds === "number" ? seconds : 30);
+      } else if (payload?.type === "agent.state.change" && onAgentState) {
+        if (typeof payload.state === "string") onAgentState(payload.state);
+      }
+    } catch {
+      // Non-JSON or unexpected payload — ignore.
+    }
+  });
+  return null;
+}
+
+function VoiceAssistantVisualizer({ agentState }: { agentState?: string }) {
   const { state, audioTrack } = useVoiceAssistant();
   const { microphoneTrack, localParticipant } = useLocalParticipant();
 
@@ -37,8 +64,15 @@ function VoiceAssistantVisualizer() {
     connecting: "Connecting…",
     listening: "Listening…",
     thinking: "Thinking…",
+    generating: "Composing a reply…",
     speaking: "Ella is speaking…",
+    interrupted: "Interrupted — go ahead",
   };
+
+  // Prefer the agent's own published state (from backend) when present —
+  // it distinguishes "thinking" from "generating" from "speaking" more
+  // precisely than LiveKit's derived state.
+  const effective = agentState ?? state;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4">
@@ -53,7 +87,7 @@ function VoiceAssistantVisualizer() {
         )}
       </div>
       <p className="text-sm text-muted-foreground animate-pulse">
-        {stateLabel[state] ?? state}
+        {stateLabel[effective] ?? effective}
       </p>
     </div>
   );
@@ -70,10 +104,24 @@ interface VoiceCallProps {
 export default function VoiceCall({ className }: VoiceCallProps) {
   const { connectionDetails, isConnecting, error, connect, disconnect } =
     useVoiceCall();
+  const [crisisState, setCrisisState] = useState<{ open: boolean; seconds: number }>({
+    open: false,
+    seconds: 30,
+  });
+  const [agentState, setAgentState] = useState<string | undefined>(undefined);
 
   const handleDisconnect = useCallback(() => {
+    setAgentState(undefined);
     void disconnect();
   }, [disconnect]);
+
+  const handleCrisisCountdown = useCallback((seconds: number) => {
+    setCrisisState({ open: true, seconds });
+  }, []);
+
+  const closeCrisisModal = useCallback(() => {
+    setCrisisState((s) => ({ ...s, open: false }));
+  }, []);
 
   // ── Not connected: show "Talk to Ella" button ─────────────────────────
   if (!connectionDetails) {
@@ -132,7 +180,11 @@ export default function VoiceCall({ className }: VoiceCallProps) {
           className="flex flex-col items-center gap-6"
         >
           <RoomAudioRenderer />
-          <VoiceAssistantVisualizer />
+          <VoiceDataBridge
+            onCrisisCountdown={handleCrisisCountdown}
+            onAgentState={setAgentState}
+          />
+          <VoiceAssistantVisualizer agentState={agentState} />
 
           {/* End call button */}
           <DisconnectButton className="inline-flex items-center justify-center gap-2 rounded-full bg-destructive px-6 py-3 text-sm font-medium text-destructive-foreground shadow-lg transition-all hover:bg-destructive/90 hover:shadow-xl">
@@ -141,6 +193,12 @@ export default function VoiceCall({ className }: VoiceCallProps) {
           </DisconnectButton>
         </LiveKitRoom>
       </div>
+
+      <CrisisCountdownModal
+        open={crisisState.open}
+        seconds={crisisState.seconds}
+        onClose={closeCrisisModal}
+      />
     </div>
   );
 }
