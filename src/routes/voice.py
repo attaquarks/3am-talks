@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import logging
 import os
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -61,7 +62,12 @@ def livekit_token(request: Request):
     try:
         from livekit import api as lk_api
 
-        room_name = f"ella-voice-{user_id}"
+        # Unique room per call so LiveKit dispatches a fresh agent every time.
+        # Reusing a stable name can cause the dispatcher to skip job assignment
+        # while the previous agent process is still tearing down, leaving the
+        # frontend stuck in "listening" with no worker attached. The backend
+        # conversation is keyed by user_id, not room_name, so memory persists.
+        room_name = f"ella-voice-{user_id}-{uuid.uuid4().hex[:8]}"
 
         token = (
             lk_api.AccessToken(api_key=lk_api_key, api_secret=lk_api_secret)

@@ -100,8 +100,7 @@ def _extract_json(raw: str) -> Optional[dict]:
     return None
 
 
-def _colab_url() -> Optional[str]:
-    return os.getenv("COLAB_API_URL")
+from ai_layer.llm_client import post_chat_completion, _resolve_endpoints
 
 
 # Module-level HTTP client with connection pooling (reused across calls)
@@ -116,9 +115,8 @@ def _get_llm_client() -> httpx.Client:
 
 
 def _call_llm(system_prompt: str, user_prompt: str, *, max_tokens: int = 700, temperature: float = 0.2) -> str:
-    url = _colab_url()
-    if not url:
-        raise RuntimeError("COLAB_API_URL not configured")
+    if not _resolve_endpoints():
+        raise RuntimeError("No LLM endpoint configured (LLM_PRIMARY_URL / COLAB_API_URL)")
     payload = {
         "model": "psychocounsel",
         "messages": [
@@ -130,13 +128,7 @@ def _call_llm(system_prompt: str, user_prompt: str, *, max_tokens: int = 700, te
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
-    }
-    client = _get_llm_client()
-    resp = client.post(url, json=payload, headers=headers)
-    resp.raise_for_status()
+    resp = post_chat_completion(payload, client=_get_llm_client())
     body = resp.json()
     return body.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
 

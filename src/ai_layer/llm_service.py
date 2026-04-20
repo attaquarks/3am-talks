@@ -6,6 +6,8 @@ from typing import AsyncIterator, Dict, Optional, List
 from dotenv import load_dotenv
 from pathlib import Path
 
+from ai_layer.llm_client import post_chat_completion, _resolve_endpoints
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,13 +20,15 @@ class LLMService:
     """
     Service for interacting with the LLM.
     Handles prompt construction and API communication using OpenAI compatible style endpoints.
+    Routing (primary -> fallback) is handled by `ai_layer.llm_client`.
     """
 
     def __init__(self, model_name: str = "psychocounsel"):
         self.model_name = model_name
-        self.colab_api_url = os.getenv("COLAB_API_URL")
-        if not self.colab_api_url:
-            logger.warning("COLAB_API_URL is not set in environment variables.")
+        if not _resolve_endpoints():
+            logger.warning(
+                "No LLM endpoints configured. Set LLM_PRIMARY_URL and/or COLAB_API_URL."
+            )
         self.client = httpx.Client(timeout=180.0)
 
     # Core Persona - Warm, empathetic counselor who builds genuine connections
@@ -139,8 +143,6 @@ Remember: You're having a real conversation. Be natural, be human, be caring.
         }
 
         try:
-            logger.info(f"Sending request to Colab API: {self.colab_api_url}")
-
             # Log the full system prompt for debugging
             logger.info("=" * 80)
             logger.info("FULL SYSTEM PROMPT:")
@@ -148,15 +150,7 @@ Remember: You're having a real conversation. Be natural, be human, be caring.
             logger.info(messages[0]["content"])
             logger.info("=" * 80)
 
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
-            }
-
-            response = self.client.post(
-                self.colab_api_url, json=payload, headers=headers
-            )
-            response.raise_for_status()
+            response = post_chat_completion(payload, client=self.client)
 
             result = response.json()
             # OpenAI compatible response structure
@@ -242,8 +236,9 @@ IMPORTANT OUTPUT RULES:
         speaking before the full reply is generated. Never raises — a caller
         that gets an empty iterator should fall back gracefully.
         """
-        if not self.colab_api_url:
-            logger.error("generate_response_streaming: COLAB_API_URL not configured")
+        endpoints = _resolve_endpoints()
+        if not endpoints:
+            logger.error("generate_response_streaming: no LLM endpoint configured")
             return
 
         prompt_parts = self._construct_streaming_prompt(patient_utterance, context_updates)
@@ -260,43 +255,61 @@ IMPORTANT OUTPUT RULES:
             "stream": True,
             "temperature": 0.7,
         }
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {os.getenv('COLAB_API_KEY', 'EMPTY')}",
-        }
 
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
-                async with client.stream(
-                    "POST", self.colab_api_url, json=payload, headers=headers
-                ) as resp:
-                    resp.raise_for_status()
-                    async for raw_line in resp.aiter_lines():
-                        if not raw_line:
-                            continue
-                        line = raw_line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        data_str = line[len("data:"):].strip()
-                        if not data_str or data_str == "[DONE]":
-                            if data_str == "[DONE]":
-                                break
-                            continue
-                        try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-                        try:
-                            delta = (
-                                chunk.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content")
+        # Try primary first, fall back on connection-class errors / 5xx.
+        # First-byte success commits us to that endpoint — no mid-stream failover.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            for ep in endpoints:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {ep.api_key}",
+                }
+                try:
+                    async with client.stream(
+                        "POST", ep.url, json=payload, headers=headers
+                    ) as resp:
+                        if resp.status_code >= 500 or resp.status_code in (404, 502, 503, 504):
+                            logger.warning(
+                                f"LLM {ep.label} stream returned {resp.status_code}; trying next."
                             )
-                        except Exception:
-                            delta = None
-                        if delta:
-                            yield delta
-        except httpx.HTTPError as exc:
-            logger.error(f"generate_response_streaming HTTP error: {exc}")
-        except Exception as exc:
-            logger.error(f"generate_response_streaming unexpected error: {exc}")
+                            continue
+                        resp.raise_for_status()
+                        if ep.label == "fallback":
+                            logger.info("LLM stream served by fallback endpoint.")
+                        async for raw_line in resp.aiter_lines():
+                            if not raw_line:
+                                continue
+                            line = raw_line.strip()
+                            if not line.startswith("data:"):
+                                continue
+                            data_str = line[len("data:"):].strip()
+                            if not data_str or data_str == "[DONE]":
+                                if data_str == "[DONE]":
+                                    return
+                                continue
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            try:
+                                delta = (
+                                    chunk.get("choices", [{}])[0]
+                                    .get("delta", {})
+                                    .get("content")
+                                )
+                            except Exception:
+                                delta = None
+                            if delta:
+                                yield delta
+                        return
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                    logger.warning(
+                        f"LLM {ep.label} stream unreachable ({exc!r}); trying next."
+                    )
+                    continue
+                except httpx.HTTPError as exc:
+                    logger.error(f"generate_response_streaming HTTP error on {ep.label}: {exc}")
+                    return
+                except Exception as exc:
+                    logger.error(f"generate_response_streaming unexpected error on {ep.label}: {exc}")
+                    return
