@@ -192,12 +192,18 @@ class SupabaseClient:
         url = f"{self.url}/auth/v1/signup"
         try:
             response = self.client.post(
-                url, 
-                headers=self.headers, 
+                url,
+                headers=self.headers,
                 json={"email": email, "password": password}
             )
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response is not None else "<no body>"
+            logger.error(
+                f"Sign up failed: HTTP {e.response.status_code} — Supabase said: {body}"
+            )
+            raise
         except Exception as e:
             logger.error(f"Sign up failed: {e}")
             raise
@@ -207,12 +213,18 @@ class SupabaseClient:
         url = f"{self.url}/auth/v1/token?grant_type=password"
         try:
             response = self.client.post(
-                url, 
-                headers=self.headers, 
+                url,
+                headers=self.headers,
                 json={"email": email, "password": password}
             )
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if e.response is not None else "<no body>"
+            logger.error(
+                f"Sign in failed: HTTP {e.response.status_code} — Supabase said: {body}"
+            )
+            raise
         except Exception as e:
             logger.error(f"Sign in failed: {e}")
             raise

@@ -31,6 +31,7 @@ from core import (
     get_current_user,
     clear_user_sessions,
     update_user_sessions,
+    is_https_request,
     get_manager,
     require_user,
     limiter,
@@ -49,6 +50,61 @@ router = APIRouter()
 ROOT_DIR = Path(__file__).parent.parent.parent
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# ---------------------------------------------------------------------------
+# Supabase error translation
+# ---------------------------------------------------------------------------
+
+
+def _friendly_auth_error(exc: Exception) -> str:
+    """Translate a Supabase auth exception into a user-facing message.
+
+    Supabase returns the same `invalid_credentials` for both wrong-password
+    and unconfirmed-email cases (deliberate, to prevent account enumeration),
+    so the message hints at both. Other codes are surfaced clearly.
+    Falls back to a generic message for non-HTTP errors or unrecognized bodies.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return "Something went wrong. Please try again."
+
+    try:
+        data = exc.response.json()
+    except ValueError:
+        return "Authentication request failed. Please try again."
+
+    code = (data.get("error_code") or data.get("error") or "").strip().lower()
+    raw_msg = (data.get("msg") or data.get("error_description") or "").strip()
+
+    friendly = {
+        "invalid_credentials": (
+            "Invalid email or password. If you signed up recently, please "
+            "check your inbox for a confirmation link first."
+        ),
+        "email_not_confirmed": (
+            "Please confirm your email address before signing in. "
+            "Check your inbox (and spam folder) for the confirmation link."
+        ),
+        "user_already_exists": "An account with this email already exists.",
+        "email_exists": "An account with this email already exists.",
+        "weak_password": (
+            "Password is too weak. Use at least 6 characters with a mix "
+            "of letters and numbers."
+        ),
+        "signup_disabled": "New account signups are currently disabled.",
+        "over_email_send_rate_limit": (
+            "Too many emails sent recently. Please wait a few minutes and try again."
+        ),
+        "user_banned": "This account has been suspended.",
+        "validation_failed": raw_msg or "The information you entered is invalid.",
+    }
+
+    if code in friendly:
+        return friendly[code]
+
+    if raw_msg and len(raw_msg) < 200:
+        return raw_msg
+    return "Authentication failed. Please try again."
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -132,14 +188,17 @@ def register(request: Request, body: RegisterRequest, response: Response):
         )
 
         logger.info(f"[register] New user registered: {user_id}")
-        create_session(user_data, response)
+        create_session(user_data, response, request)
         return user_data
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Registration failed: {e}")
-        raise HTTPException(status_code=400, detail={"message": str(e)})
+        raise HTTPException(
+            status_code=400,
+            detail={"message": _friendly_auth_error(e)},
+        )
 
 
 @router.post("/api/login")
@@ -168,14 +227,17 @@ def login(request: Request, body: LoginRequest, response: Response):
             created_at=profile.get("created_at", datetime.utcnow().isoformat()),
         )
         _get_stats_persistent(user_id)
-        create_session(user_data, response)
+        create_session(user_data, response, request)
         return user_data
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Login failed: {e}")
-        raise HTTPException(status_code=401, detail={"message": str(e)})
+        raise HTTPException(
+            status_code=401,
+            detail={"message": _friendly_auth_error(e)},
+        )
 
 
 @router.post("/api/auth/social")
@@ -188,7 +250,7 @@ def social_login(body: SocialLoginRequest, response: Response):
 
 
 @router.get("/api/auth/oauth/{provider}/start")
-def oauth_start(provider: str):
+def oauth_start(provider: str, request: Request):
     """Start Supabase implicit OAuth flow — redirects browser to Supabase /authorize.
 
     Supabase manages its own `state` parameter internally — injecting a custom
@@ -222,6 +284,7 @@ def oauth_start(provider: str):
         httponly=True,
         samesite="lax",  # must be lax: cookie is read after a cross-site OAuth redirect
         path="/",
+        secure=is_https_request(request),
     )
     return resp
 

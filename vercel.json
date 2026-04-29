@@ -5,6 +5,7 @@
   "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://noncoagulative-crissy-unsuffocative.ngrok-free.dev/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

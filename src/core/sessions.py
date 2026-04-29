@@ -56,11 +56,42 @@ temp_oauth_sessions: Dict[str, dict] = {}
 # ---------------------------------------------------------------------------
 
 
-def create_session(user_data: dict, response: Response, secure: bool = False) -> str:
-    """Create a new session, sign the token, and set it as an httpOnly cookie."""
+def is_https_request(request: Optional[Request]) -> bool:
+    """Return True when the originating request was HTTPS.
+
+    Trusts the X-Forwarded-Proto header set by upstream proxies (ngrok,
+    Vercel rewrite). Falls back to the immediate request scheme when no
+    forwarded header is present. Modern browsers reject Secure=False
+    cookies on HTTPS pages, so we need this to set the right flag.
+    """
+    if request is None:
+        return False
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip().lower() == "https"
+    return request.url.scheme == "https"
+
+
+def create_session(
+    user_data: dict,
+    response: Response,
+    request: Optional[Request] = None,
+    *,
+    secure: Optional[bool] = None,
+) -> str:
+    """Create a new session, sign the token, and set it as an httpOnly cookie.
+
+    The Secure flag is auto-detected from `request` so the same code works
+    on HTTP localhost and HTTPS production behind Vercel/ngrok. Pass `secure=`
+    explicitly to override.
+    """
     token = str(uuid.uuid4())
     signed_token = signer.sign(token).decode()
     sessions[token] = user_data
+
+    if secure is None:
+        secure = is_https_request(request)
+
     response.set_cookie(
         key=SESSION_COOKIE,
         value=signed_token,

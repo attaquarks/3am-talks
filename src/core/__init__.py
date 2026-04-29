@@ -17,6 +17,7 @@ from .sessions import (
     get_current_user,
     clear_user_sessions,
     update_user_sessions,
+    is_https_request,
 )
 from .rate_limit import limiter
 from .helpers import (
@@ -52,6 +53,7 @@ __all__ = [
     "SECRET_KEY", "SESSION_COOKIE", "SESSION_MAX_AGE", "VOICE_AGENT_SECRET",
     "signer", "sessions", "temp_oauth_sessions",
     "create_session", "get_current_user", "clear_user_sessions", "update_user_sessions",
+    "is_https_request",
     # rate limiting
     "limiter",
     # helpers

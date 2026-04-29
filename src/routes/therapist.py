@@ -284,7 +284,7 @@ def _link_counterparty(link: dict, viewer_id: str) -> dict:
 # =======================================================================
 
 @router.post("/register")
-def therapist_register(body: TherapistRegisterRequest, response: Response):
+def therapist_register(body: TherapistRegisterRequest, request: Request, response: Response):
     """Register a therapist account; starts in pending_verification state."""
     try:
         mgr = get_manager()
@@ -349,7 +349,7 @@ def therapist_register(body: TherapistRegisterRequest, response: Response):
         )
         user_data["role"] = "therapist"
         user_data["account_status"] = "pending_verification"
-        create_session(user_data, response)
+        create_session(user_data, response, request)
         return user_data
     except HTTPException:
         raise
