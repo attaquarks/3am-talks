@@ -169,7 +169,7 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
                             className={cn(
                                 "relative flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                                 role === 'therapist'
-                                    ? 'bg-card shadow-md text-secondary-foreground'
+                                    ? 'bg-card shadow-md text-secondary'
                                     : 'text-muted-foreground hover:text-foreground'
                             )}
                         >

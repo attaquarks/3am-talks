@@ -75,8 +75,8 @@ const Auth: React.FC = () => {
                   exit={{ opacity: 0, y: -12 }}
                   transition={{ duration: 0.35 }}
                 >
-                  <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-card border border-secondary/30 text-secondary-foreground text-[10px] font-black uppercase tracking-[0.2em] mb-10 shadow-xl shadow-secondary/10">
-                    <Stethoscope className="w-3.5 h-3.5 text-secondary-foreground" />
+                  <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-full bg-card border border-secondary/30 text-secondary text-[10px] font-black uppercase tracking-[0.2em] mb-10 shadow-xl shadow-secondary/10">
+                    <Stethoscope className="w-3.5 h-3.5 text-secondary" />
                     Clinician Network
                   </div>
 
