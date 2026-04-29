@@ -28,6 +28,7 @@ logger = logging.getLogger("therapist-routes")
 
 router = APIRouter(prefix="/api/therapist", tags=["therapist"])
 shared_router = APIRouter(tags=["therapist-shared"])
+public_router = APIRouter(tags=["therapist-public"])
 sb = SupabaseClient()
 # ---------------------------------------------------------------------------
 # Pydantic request models
@@ -761,6 +762,7 @@ def homework_assign(body: HomeworkAssignRequest, request: Request):
     row = get_manager().db_client.insert("patient_homework", payload)
     return row
 
+@public_router.patch("/api/patient/homework/{homework_id}")
 @router.patch("/homework/{homework_id}")
 def homework_update_any(homework_id: str, body: HomeworkUpdateRequest, request: Request):
     """Both therapist (owner) and patient (recipient) can update status/reflection."""
@@ -795,6 +797,7 @@ def homework_update_any(homework_id: str, body: HomeworkUpdateRequest, request: 
     return refreshed[0] if refreshed else row
 
 @shared_router.get("/api/patient/homework")
+@public_router.get("/api/patient/homework")
 def homework_list_patient(request: Request):
     user = require_user(request)
     patient_id = str(user["id"])
@@ -817,6 +820,7 @@ def homework_list_patient(request: Request):
 # =======================================================================
 
 @shared_router.post("/api/invite-therapist")
+@public_router.post("/api/invite-therapist")
 def patient_invite_therapist(body: InviteRequest, request: Request):
     user = require_user(request)
     if str(user.get("role") or "").lower() != "patient":
@@ -923,6 +927,7 @@ def _create_invite_or_request(inviter: dict, email: str, invite_type: str, expec
     }
 
 @shared_router.get("/api/links/pending")
+@public_router.get("/api/links/pending")
 def links_pending(request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -951,6 +956,7 @@ def links_pending(request: Request):
     return {"links": enriched}
 
 @shared_router.get("/api/links")
+@public_router.get("/api/links")
 def links_all(request: Request):
     """All links for the current user, any status."""
     user = require_user(request)
@@ -963,6 +969,7 @@ def links_all(request: Request):
     return {"links": enriched}
 
 @shared_router.post("/api/links/{link_id}/accept")
+@public_router.post("/api/links/{link_id}/accept")
 def links_accept(link_id: str, request: Request):
     """The party currently in 'pending_*' accepts. For patient-initiated:
     therapist accepts (moves to pending_patient for consent confirmation).
@@ -999,6 +1006,7 @@ def links_accept(link_id: str, request: Request):
     return {"link": refreshed[0] if refreshed else {**link, **updates}}
 
 @shared_router.post("/api/links/{link_id}/decline")
+@public_router.post("/api/links/{link_id}/decline")
 def links_decline(link_id: str, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1016,6 +1024,7 @@ def links_decline(link_id: str, request: Request):
     return {"declined": True, "link_id": link_id}
 
 @shared_router.post("/api/links/{link_id}/confirm-consent")
+@public_router.post("/api/links/{link_id}/confirm-consent")
 def links_confirm_consent(link_id: str, body: ConsentConfirmRequest, request: Request):
     """Patient confirms consent with scopes. Activates the link."""
     user = require_user(request)
@@ -1049,6 +1058,7 @@ def links_confirm_consent(link_id: str, body: ConsentConfirmRequest, request: Re
     return {"link": refreshed[0] if refreshed else {**link, **updates}}
 
 @shared_router.post("/api/links/{link_id}/revoke")
+@public_router.post("/api/links/{link_id}/revoke")
 def links_revoke(link_id: str, body: LinkRevokeRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1073,6 +1083,7 @@ def links_revoke(link_id: str, body: LinkRevokeRequest, request: Request):
     return {"revoked": True, "link_id": link_id}
 
 @shared_router.get("/api/invite/info")
+@public_router.get("/api/invite/info")
 def invite_info(request: Request):
     token = request.query_params.get("token")
     if not token:
@@ -1086,6 +1097,7 @@ def invite_info(request: Request):
     return invite
 
 @shared_router.post("/api/invite/accept")
+@public_router.post("/api/invite/accept")
 def invite_accept(request: Request, body: dict = {}):
     token = (body or {}).get("token") or request.query_params.get("token")
     if not token:
@@ -1282,6 +1294,7 @@ def crisis_resolve(event_id: str, request: Request):
 # =======================================================================
 
 @shared_router.post("/api/reports")
+@public_router.post("/api/reports")
 def reports_submit(body: ReportSubmitRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1303,6 +1316,7 @@ def reports_submit(body: ReportSubmitRequest, request: Request):
     return row
 
 @shared_router.post("/api/feedback")
+@public_router.post("/api/feedback")
 def feedback_submit(body: FeedbackSubmitRequest, request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1412,6 +1426,7 @@ def export_patient_pdf(patient_id: str, request: Request):
 # =======================================================================
 
 @shared_router.get("/api/patient/therapists")
+@public_router.get("/api/patient/therapists")
 def patient_therapists(request: Request):
     user = require_user(request)
     uid = str(user["id"])
@@ -1421,6 +1436,7 @@ def patient_therapists(request: Request):
     return {"links": enriched}
 
 @shared_router.get("/api/patient/access-log")
+@public_router.get("/api/patient/access-log")
 def patient_access_log(request: Request):
     user = require_user(request)
     uid = str(user["id"])

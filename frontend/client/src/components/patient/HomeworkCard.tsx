@@ -59,18 +59,18 @@ export default function HomeworkCard() {
     return (
         <>
             <Card className="animate-fade-in-up">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <ClipboardCheck className="h-5 w-5 text-primary" />
+                <CardHeader className="pb-4">
+                    <CardTitle className="flex items-center gap-3 text-2xl">
+                        <ClipboardCheck className="h-6 w-6 text-primary" />
                         From your therapist
                     </CardTitle>
-                    <CardDescription>
+                    <CardDescription className="text-base mt-1">
                         {pending.length > 0
                             ? `${pending.length} task${pending.length > 1 ? "s" : ""} waiting for you.`
                             : "All caught up — nice work."}
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-4">
                     {items.slice(0, 4).map((h) => (
                         <button
                             key={h.homework_id}
@@ -78,19 +78,19 @@ export default function HomeworkCard() {
                                 setSelected(h);
                                 setReflection(h.patient_reflection ?? "");
                             }}
-                            className="w-full text-left p-4 rounded-2xl border border-border hover:bg-muted/30 transition-colors"
+                            className="w-full text-left p-5 rounded-2xl border border-border hover:bg-muted/30 transition-colors"
                         >
-                            <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1">
-                                    <p className="font-medium text-sm">{h.title}</p>
-                                    {h.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{h.description}</p>}
+                                    <p className="font-medium text-lg">{h.title}</p>
+                                    {h.description && <p className="text-sm text-muted-foreground mt-1.5 line-clamp-2">{h.description}</p>}
                                     {h.due_at && (
-                                        <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1">
-                                            <Calendar className="h-3 w-3" /> Due {new Date(h.due_at).toLocaleDateString()}
+                                        <p className="text-sm text-muted-foreground mt-3 flex items-center gap-1.5">
+                                            <Calendar className="h-4 w-4" /> Due {new Date(h.due_at).toLocaleDateString()}
                                         </p>
                                     )}
                                 </div>
-                                <Badge variant={h.status === "completed" ? "default" : "outline"} className="text-[10px] shrink-0">
+                                <Badge variant={h.status === "completed" ? "default" : "outline"} className="text-xs shrink-0">
                                     {h.status}
                                 </Badge>
                             </div>

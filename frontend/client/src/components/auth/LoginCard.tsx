@@ -4,7 +4,6 @@ import { AuthMode } from '@/types/auth';
 import { Mail, Lock, User, ArrowRight, Chrome, Facebook, Loader2, Sparkles, Stethoscope, Heart, BadgeCheck } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { getSupabaseBrowser } from '@/lib/supabaseBrowser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -123,23 +122,11 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
         }
     };
 
-    const handleSocialLogin = async (provider: 'google' | 'facebook') => {
-        try {
-            const supabase = getSupabaseBrowser();
-            const { error } = await supabase.auth.signInWithOAuth({
-                provider,
-                options: { redirectTo: `${window.location.origin}/auth/oauth-success` },
-            });
-            if (error) {
-                toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
-            }
-        } catch (e: any) {
-            toast({
-                title: 'Login failed',
-                description: e?.message ?? 'OAuth is not configured.',
-                variant: 'destructive',
-            });
-        }
+    const handleSocialLogin = (provider: 'google' | 'facebook') => {
+        // Full-page navigation to backend start route — backend sets the
+        // oauth_nonce cookie and redirects to Supabase /authorize. This
+        // keeps the CSRF-nonce guard working end-to-end.
+        window.location.href = `/api/auth/oauth/${provider}/start`;
     };
 
     return (
@@ -182,7 +169,7 @@ const LoginCard: React.FC<LoginCardProps> = ({ onRoleChange, initialRole = 'pati
                             className={cn(
                                 "relative flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                                 role === 'therapist'
-                                    ? 'bg-card shadow-md text-secondary-foreground'
+                                    ? 'bg-card shadow-md text-secondary'
                                     : 'text-muted-foreground hover:text-foreground'
                             )}
                         >

@@ -8,14 +8,21 @@ to avoid sharing sessions across module-reload boundaries.
 
 import os
 import uuid
+from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import Request, Response
+from dotenv import load_dotenv
 from itsdangerous import BadSignature, TimestampSigner
 
 # ---------------------------------------------------------------------------
 # Secret / signing
 # ---------------------------------------------------------------------------
+
+# Ensure .env is loaded no matter how the app is started (uvicorn module path,
+# direct script execution, tests, etc.).
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 
 SECRET_KEY = os.getenv("SESSION_SECRET")
 if not SECRET_KEY:

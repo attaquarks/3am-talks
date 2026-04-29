@@ -14,8 +14,6 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from ai_layer.llm_client import post_chat_completion
-
 logger = logging.getLogger("summary-service")
 
 
@@ -102,6 +100,9 @@ def _extract_json(raw: str) -> Optional[dict]:
     return None
 
 
+from ai_layer.llm_client import post_chat_completion, _resolve_endpoints
+
+
 # Module-level HTTP client with connection pooling (reused across calls)
 _llm_client: Optional[httpx.Client] = None
 
@@ -114,6 +115,8 @@ def _get_llm_client() -> httpx.Client:
 
 
 def _call_llm(system_prompt: str, user_prompt: str, *, max_tokens: int = 700, temperature: float = 0.2) -> str:
+    if not _resolve_endpoints():
+        raise RuntimeError("No LLM endpoint configured (LLM_PRIMARY_URL / COLAB_API_URL)")
     payload = {
         "model": "psychocounsel",
         "messages": [

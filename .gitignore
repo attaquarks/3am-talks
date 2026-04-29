@@ -52,3 +52,7 @@ AUDIT REPORTS/
 # Local crisis-detector evaluation data (real chat logs — not for the repo)
 data.txt
 crisis_flow_results.md
+.agent-config/
+agent-config.local.yaml
+anywhere-agents/
+.claude/scheduled_tasks.lock

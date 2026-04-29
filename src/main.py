@@ -17,10 +17,9 @@ import sys
 # ---------------------------------------------------------------------------
 # Environment & path setup
 # ---------------------------------------------------------------------------
-load_dotenv()
-
 SRC_DIR = Path(__file__).parent
 ROOT_DIR = SRC_DIR.parent
+load_dotenv(ROOT_DIR / ".env")
 sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(ROOT_DIR))
 
@@ -30,9 +29,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("3am-api")
 
-# Ensure core lazy manager is available
+# Ensure core manager and lazy singleton state are available
 from core.helpers import _conversation_manager
-from core import limiter
+from core import limiter, get_manager
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -56,6 +55,15 @@ from routes.data import router as data_router
 async def lifespan(app: FastAPI):
     logger.info("3AM Talks API starting on port 5050")
     logger.info("Frontend expected at http://localhost:5173")
+
+    # Eagerly initialize ConversationManager so critical dependency failures
+    # happen at startup rather than on the first authenticated request.
+    try:
+        get_manager()
+        logger.info("ConversationManager preloaded at startup")
+    except Exception as e:
+        logger.critical(f"Startup failed while initializing ConversationManager: {e}")
+        raise
     
     # #region agent log
     try:

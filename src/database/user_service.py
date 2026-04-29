@@ -201,10 +201,12 @@ class UserService:
             raise
     
     def update_conversation_turns(
-        self, 
-        conversation_id: str, 
+        self,
+        conversation_id: str,
         increment: int = 1,
-        update_personality_turn: bool = False
+        update_personality_turn: bool = False,
+        last_personality_update_turn: Optional[int] = None,
+        touch_updated_at: bool = False,
     ) -> dict:
         """Update conversation turn count"""
         try:
@@ -217,9 +219,15 @@ class UserService:
             new_turns = current_turns + increment
             
             update_data = {"total_turns": new_turns}
-            
-            if update_personality_turn:
+
+            if last_personality_update_turn is not None:
+                update_data["last_personality_update_turn"] = int(last_personality_update_turn)
+            elif update_personality_turn:
                 update_data["last_personality_update_turn"] = new_turns
+
+            # Some deployments use started_at/ended_at only (no updated_at column).
+            if touch_updated_at and "updated_at" in conversation:
+                update_data["updated_at"] = datetime.utcnow().isoformat()
             
             updated_conversation = self.db.update(
                 "conversations",
@@ -266,6 +274,35 @@ class UserService:
             return message
         except Exception as e:
             logger.error(f"Failed to add message: {e}")
+            raise
+
+    def add_messages_batch(self, messages: List[dict]) -> List[dict]:
+        """Insert a batch of messages preserving order."""
+        try:
+            if not messages:
+                return []
+
+            payloads: List[dict] = []
+            for msg in messages:
+                conversation_id = normalize_postgrest_value(msg.get("conversation_id"))
+                payload = {
+                    "conversation_id": conversation_id,
+                    "user_id": msg.get("user_id"),
+                    "role": msg.get("role"),
+                    "content": msg.get("content"),
+                    "turn_index": msg.get("turn_index"),
+                    # PostgREST bulk inserts require all objects to have matching keys.
+                    "personality_scores_at_turn": msg.get("personality_scores_at_turn", None),
+                    "rag_techniques_used": msg.get("rag_techniques_used", None),
+                }
+
+                payloads.append(payload)
+
+            inserted = self.db.insert_many("messages", payloads)
+            logger.info("Added %s batched messages", len(payloads))
+            return inserted
+        except Exception as e:
+            logger.error(f"Failed to add message batch: {e}")
             raise
     
     def get_conversation_history(

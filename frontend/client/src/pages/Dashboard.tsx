@@ -331,7 +331,7 @@ export default function Dashboard() {
     <div className="min-h-screen relative bg-gradient-to-br from-primary/10 via-background to-secondary/10 selection:bg-primary/30">
       <BackgroundDecor />
       <Navigation />
-      <main className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-10 py-6 pb-24 max-w-7xl">
+      <main className="relative z-10 mx-auto w-full px-4 sm:px-6 lg:px-12 xl:px-16 py-6 pb-24 max-w-[110rem]">
         {/* Welcome */}
         <div className="text-center mb-6 animate-fade-in-up">
           <h1 className="text-2xl md:text-3xl font-light tracking-tight text-foreground mb-1">
@@ -344,32 +344,56 @@ export default function Dashboard() {
         {!statsLoading && stats && (
           <div className="grid grid-cols-3 gap-4 md:gap-6 mb-6 max-w-3xl mx-auto animate-fade-in-up delay-75">
             <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
-              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">🌟 {stats.current_streak}</div>
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none flex items-center justify-center gap-2">
+                <img
+                  src="/icons/streak.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-7 w-7 md:h-8 md:w-8 object-contain"
+                />
+                <span>{stats.current_streak}</span>
+              </div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Streak</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
-              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">📊 {stats.mood_improvement_percentage}%</div>
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none flex items-center justify-center gap-2">
+                <img
+                  src="/icons/improvement.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-7 w-7 md:h-8 md:w-8 object-contain"
+                />
+                <span>{stats.mood_improvement_percentage}%</span>
+              </div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Improvement</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/60 backdrop-blur px-5 py-4 text-center">
-              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none">💝 {stats.total_sessions}</div>
+              <div className="text-2xl md:text-3xl font-semibold text-primary leading-none flex items-center justify-center gap-2">
+                <img
+                  src="/icons/sessions.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-7 w-7 md:h-8 md:w-8 object-contain"
+                />
+                <span>{stats.total_sessions}</span>
+              </div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground mt-2">Sessions</div>
             </div>
           </div>
         )}
 
         {/* Quick Actions */}
-        <div className="grid sm:grid-cols-3 gap-3 mb-6 animate-fade-in-up delay-100">
+        <div className="grid sm:grid-cols-3 gap-5 mb-8 animate-fade-in-up delay-100">
           <Link to="/therapist" className="block">
             <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full">
-              <CardContent className="p-5">
-                <div className="flex items-center space-x-4">
-                  <div className="w-11 h-11 bg-gradient-primary rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
-                    <MessageCircle className="h-5 w-5 text-white" />
+              <CardContent className="p-7">
+                <div className="flex items-center space-x-5">
+                  <div className="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center group-hover:animate-float shrink-0">
+                    <MessageCircle className="h-8 w-8 text-white" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-semibold text-foreground text-sm">Start Conversation</h3>
-                    <p className="text-xs text-muted-foreground">Talk to ELLA now</p>
+                    <h3 className="font-semibold text-foreground text-xl">Start Conversation</h3>
+                    <p className="text-sm text-muted-foreground mt-1">Talk to ELLA now</p>
                   </div>
                 </div>
               </CardContent>
@@ -377,14 +401,14 @@ export default function Dashboard() {
           </Link>
 
           <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full" onClick={() => setShowMoodJournal(true)}>
-            <CardContent className="p-5">
-              <div className="flex items-center space-x-4">
-                <div className="w-11 h-11 bg-secondary rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
-                  <BookOpen className="h-5 w-5 text-white" />
+            <CardContent className="p-7">
+              <div className="flex items-center space-x-5">
+                <div className="w-16 h-16 bg-secondary rounded-2xl flex items-center justify-center group-hover:animate-float shrink-0">
+                  <BookOpen className="h-8 w-8 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-foreground text-sm">Mood Journal</h3>
-                  <p className="text-xs text-muted-foreground">Log your feelings</p>
+                  <h3 className="font-semibold text-foreground text-xl">Mood Journal</h3>
+                  <p className="text-sm text-muted-foreground mt-1">Log your feelings</p>
                 </div>
               </div>
             </CardContent>
@@ -392,14 +416,14 @@ export default function Dashboard() {
 
           <Link to="/history" className="block">
             <Card className="cursor-pointer group hover:shadow-glow transition-all duration-300 h-full">
-              <CardContent className="p-5">
-                <div className="flex items-center space-x-4">
-                  <div className="w-11 h-11 bg-accent rounded-xl flex items-center justify-center group-hover:animate-float shrink-0">
-                    <TrendingUp className="h-5 w-5 text-white" />
+              <CardContent className="p-7">
+                <div className="flex items-center space-x-5">
+                  <div className="w-16 h-16 bg-accent rounded-2xl flex items-center justify-center group-hover:animate-float shrink-0">
+                    <TrendingUp className="h-8 w-8 text-white" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-semibold text-foreground text-sm">Insights</h3>
-                    <p className="text-xs text-muted-foreground">View your progress</p>
+                    <h3 className="font-semibold text-foreground text-xl">Insights</h3>
+                    <p className="text-sm text-muted-foreground mt-1">View your progress</p>
                   </div>
                 </div>
               </CardContent>
@@ -408,35 +432,35 @@ export default function Dashboard() {
         </div>
 
         {/* Main content: 2-up on md+, stacked on mobile */}
-        <div className="grid md:grid-cols-2 gap-5 mb-6 animate-fade-in-up delay-200">
+        <div className="grid md:grid-cols-2 gap-7 mb-8 animate-fade-in-up delay-200">
           {/* Mood — check-in + recent entries combined */}
           <Card className="h-full flex flex-col">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarIcon className="h-4 w-4 text-primary" />
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-2xl">
+                <CalendarIcon className="h-6 w-6 text-primary" />
                 <span>Your Mood</span>
               </CardTitle>
-              <CardDescription className="text-xs">
+              <CardDescription className="text-base mt-1">
                 {hasLoggedToday ? "Logged for today — nice work." : "A 30-second check-in, then your recent entries."}
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col gap-4">
+            <CardContent className="flex-1 flex flex-col gap-5">
               {/* Check-in CTA */}
-              <div className="flex items-center gap-4 p-4 rounded-2xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/60">
-                <div className="w-12 h-12 bg-gradient-hero rounded-full flex items-center justify-center shrink-0 animate-pulse-soft">
-                  <MessageCircle className="h-5 w-5 text-primary" />
+              <div className="flex items-center gap-5 p-5 rounded-2xl bg-gradient-to-br from-primary/5 to-secondary/5 border border-border/60">
+                <div className="w-16 h-16 bg-gradient-hero rounded-full flex items-center justify-center shrink-0 animate-pulse-soft">
+                  <MessageCircle className="h-7 w-7 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">
+                  <p className="text-lg font-medium">
                     {hasLoggedToday ? "See you tomorrow" : "How are you feeling today?"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground mt-1">
                     {hasLoggedToday ? "Come back for tomorrow's log." : "Quick mood + reflection."}
                   </p>
                 </div>
                 <Button
                   variant="hero"
-                  size="sm"
+                  size="lg"
                   onClick={() => setShowCheckinModal(true)}
                   disabled={hasLoggedToday}
                   className="shrink-0"
@@ -447,38 +471,43 @@ export default function Dashboard() {
 
               {/* Recent entries */}
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recent entries</p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Recent entries</p>
                   {moodEntries.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground">{moodEntries.length} total</span>
+                    <span className="text-xs text-muted-foreground">{moodEntries.length} total</span>
                   )}
                 </div>
-                <div className="space-y-2 flex-1">
+                <div className="space-y-3 flex-1">
                   {moodLoading ? (
-                    <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>
+                    <div className="text-center py-6 text-muted-foreground text-base">Loading...</div>
                   ) : moodEntries.length === 0 ? (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
+                    <div className="text-center py-8 text-muted-foreground text-base">
                       No entries yet — your first check-in starts the streak.
                     </div>
                   ) : (
                     moodEntries.slice(0, 4).map((entry) => (
                       <div
                         key={entry.id}
-                        className="flex items-center gap-3 p-2.5 rounded-xl border border-border hover:bg-muted/40 transition-colors"
+                        className="flex items-center gap-4 p-4 rounded-xl border border-border hover:bg-muted/40 transition-colors"
                       >
-                        {getMoodIcon(entry.mood)}
+                        <div className="shrink-0">
+                          {(() => {
+                            const icon = getMoodIcon(entry.mood);
+                            return <div className="[&>svg]:h-6 [&>svg]:w-6">{icon}</div>;
+                          })()}
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-foreground">
+                          <p className="text-base font-medium text-foreground">
                             {new Date(entry.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
                           </p>
-                          <p className="text-xs text-muted-foreground truncate">{entry.note || 'No note'}</p>
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">{entry.note || 'No note'}</p>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
-                <Button variant="outline" size="sm" className="w-full mt-3" onClick={() => setShowFullCalendar(true)}>
-                  <CalendarIcon className="mr-2 h-3 w-3" />
+                <Button variant="outline" size="lg" className="w-full mt-4 text-base" onClick={() => setShowFullCalendar(true)}>
+                  <CalendarIcon className="mr-2 h-5 w-5" />
                   View full calendar
                 </Button>
               </div>
@@ -487,12 +516,12 @@ export default function Dashboard() {
 
           {/* Personality Traits */}
           <Card className="h-full flex flex-col">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Brain className="h-4 w-4 text-primary" />
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-2xl">
+                <Brain className="h-6 w-6 text-primary" />
                 <span>Personality Profile</span>
               </CardTitle>
-              <CardDescription className="text-xs">Big Five traits from your ELLA sessions</CardDescription>
+              <CardDescription className="text-base mt-1">Big Five traits from your ELLA sessions</CardDescription>
             </CardHeader>
             <CardContent className="flex-1">
               <PersonalityTraits profile={profile} loading={profileLoading} />

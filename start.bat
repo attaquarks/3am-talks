@@ -19,7 +19,7 @@ echo [2/3] Starting frontend on http://localhost:5173 ...
 start "3AM-Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
 echo [3/3] Starting Voice Agent (Ella) ...
-start "3AM-VoiceAgent" cmd /k "cd /d "%~dp0" && ".venv\Scripts\python.exe" src\voice\agent.py dev"
+start "3AM-VoiceAgent" cmd /k "cd /d "%~dp0" && ".venv\Scripts\python.exe" -m src.voice.agent dev"
 
 echo.
 echo ================================================

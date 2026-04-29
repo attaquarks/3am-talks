@@ -65,6 +65,10 @@ class QuestionnaireAnswerRequest(BaseModel):
     answers: List[dict]
 
 
+class FlushRequest(BaseModel):
+    conversation_id: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Chat / conversation
 # ---------------------------------------------------------------------------
@@ -111,6 +115,7 @@ async def chat(body: ChatRequest, request: Request):
             "turn": chat_result.get("turn"),
             "personality_scores": chat_result.get("personality_scores"),
             "rag_techniques_used": chat_result.get("rag_techniques_used", 0),
+            "persistence_mode": chat_result.get("metadata", {}).get("persistence_mode"),
         }
         if crisis_payload:
             response["crisis"] = crisis_payload
@@ -125,9 +130,7 @@ def create_conversation(body: CreateConversationRequest, request: Request):
     user = require_user(request)
     user_id = str(user["id"])
     try:
-        conv = get_manager().user_service.create_conversation(
-            user_id, title=body.title or None
-        )
+        conv = get_manager().user_service.create_conversation(user_id)
         return _backend_conversation_to_frontend(conv)
     except Exception as e:
         logger.error(f"Create conversation error for {user_id}: {e}")
@@ -149,6 +152,11 @@ def get_conversations(request: Request):
                 "limit": str(limit),
                 "offset": str(offset),
             },
+        )
+        rows = sorted(
+            rows,
+            key=lambda c: (c.get("ended_at") or c.get("started_at") or c.get("created_at") or ""),
+            reverse=True,
         )
         return {
             "conversations": [_backend_conversation_to_frontend(c) for c in rows],
@@ -177,23 +185,22 @@ def get_active_conversation(request: Request):
 def update_conversation(body: UpdateConversationRequest, request: Request):
     user = require_user(request)
     user_id = str(user["id"])
-    updates: dict = {"updated_at": datetime.utcnow().isoformat()}
-    if body.title is not None:
-        updates["title"] = body.title
-    if body.summary is not None:
-        updates["summary"] = body.summary
+    updates: dict = {}
     if body.is_active is not None:
         updates["is_active"] = body.is_active
+        if body.is_active is False:
+            updates["ended_at"] = datetime.utcnow().isoformat()
     try:
         mgr = get_manager()
-        mgr.db_client.update(
-            "conversations",
-            updates,
-            {"conversation_id": f"eq.{body.conversation_id}", "user_id": f"eq.{user_id}"},
-        )
+        if updates:
+            mgr.db_client.update(
+                "conversations",
+                updates,
+                {"conversation_id": f"eq.{body.conversation_id}", "user_id": f"eq.{user_id}"},
+            )
         row = mgr.db_client.select(
             "conversations",
-            filters={"conversation_id": f"eq.{body.conversation_id}"},
+            filters={"conversation_id": f"eq.{body.conversation_id}", "user_id": f"eq.{user_id}"},
         )
         return {"conversation": _backend_conversation_to_frontend(row[0]) if row else updates}
     except Exception as e:
@@ -268,9 +275,15 @@ def end_session(request: Request):
             return {"message": "No active session", "summary": None}
 
         conversation_id = active.get("conversation_id")
+        flush_result = None
+        try:
+            flush_result = mgr.flush_conversation_buffer(conversation_id, reason="end-session")
+        except Exception as fe:
+            logger.warning(f"Buffer flush failed before end-session for {conversation_id}: {fe}")
+
         mgr.db_client.update(
             "conversations",
-            {"is_active": False, "updated_at": datetime.utcnow().isoformat()},
+            {"is_active": False, "ended_at": datetime.utcnow().isoformat()},
             {"conversation_id": f"eq.{conversation_id}"},
         )
 
@@ -294,11 +307,55 @@ def end_session(request: Request):
             except Exception as se:
                 logger.warning(f"SOAP summary failed: {se}")
 
-        return {"message": "Session ended", "conversation_id": conversation_id, "summary": summary}
+        return {
+            "message": "Session ended",
+            "conversation_id": conversation_id,
+            "summary": summary,
+            "flush": flush_result,
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"End session error for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail={"message": str(e)})
+
+
+@router.post("/api/session/start")
+def session_start(request: Request):
+    """Create a new chat session conversation for therapist UI."""
+    user = require_user(request)
+    user_id = str(user["id"])
+    try:
+        session_result = get_manager().start_session(user_id)
+        return {
+            "conversation_id": session_result.get("conversation_id"),
+            "message": session_result.get("message", "Session started successfully"),
+        }
+    except Exception as e:
+        logger.error(f"Session start error for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail={"message": str(e)})
+
+
+@router.post("/api/session/flush")
+def session_flush(body: FlushRequest, request: Request):
+    """Flush buffered messages for a specific or active conversation."""
+    user = require_user(request)
+    user_id = str(user["id"])
+    mgr = get_manager()
+
+    conv_id = body.conversation_id
+    if not conv_id:
+        active = mgr.user_service.get_active_conversation(user_id)
+        conv_id = active.get("conversation_id") if active else None
+
+    if not conv_id:
+        return {"flushed": False, "message": "No active conversation to flush"}
+
+    try:
+        result = mgr.flush_conversation_buffer(conv_id, reason="api-session-flush")
+        return {"flushed": True, "conversation_id": conv_id, "result": result}
+    except Exception as e:
+        logger.error(f"Session flush error for {user_id}, conv={conv_id}: {e}")
         raise HTTPException(status_code=500, detail={"message": str(e)})
 
 

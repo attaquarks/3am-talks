@@ -20,7 +20,13 @@ from crisis.alert import (
     start_countdown,
 )
 from crisis.service import CrisisResult, RiskLevel, detect_crisis
+from conversation.state import compute_conversation_state
 from database.supabase_client import SupabaseClient
+
+# Refresh the in-memory conversation state every N turns. Small enough to
+# stay fresh through typical sessions, large enough to avoid hammering the
+# LLM with state calls.
+_STATE_REFRESH_EVERY = 4
 
 logger = logging.getLogger(__name__)
 
@@ -249,4 +255,47 @@ async def process_message_with_crisis(
         logger.exception(f"crisis pipeline errored: {crisis_payload}")
         crisis_payload = None
 
+    # Non-blocking background refresh of the conversation-state snapshot
+    # (topic / emotional tone / rolling summary). Fires every Nth turn and
+    # never blocks the response; any error is swallowed.
+    try:
+        if isinstance(chat_result, dict):
+            turn = int(chat_result.get("turn") or 0)
+            if turn and turn % _STATE_REFRESH_EVERY == 0:
+                asyncio.create_task(
+                    _refresh_conv_state(mgr, conversation_id, turn)
+                )
+    except Exception as exc:
+        logger.warning(f"failed to schedule state refresh: {exc}")
+
     return chat_result, crisis_payload
+
+
+async def _refresh_conv_state(mgr, conversation_id: str, turn: int) -> None:
+    """Pull last N messages and compute a fresh ConversationState off the
+    request path. Writes the result into mgr._conv_states when successful."""
+    try:
+        messages = await asyncio.to_thread(
+            mgr.user_service.get_conversation_history,
+            conversation_id,
+            10,
+        )
+        previous = mgr.get_conversation_state(conversation_id)
+        new_state = await asyncio.to_thread(
+            compute_conversation_state,
+            messages or [],
+            previous=previous,
+            turn=turn,
+            conversation_id=conversation_id,
+        )
+        if new_state is not None:
+            mgr.set_conversation_state(conversation_id, new_state)
+            logger.info(
+                "conv-state refreshed conv=%s turn=%s topic=%r emotion=%r",
+                conversation_id,
+                turn,
+                new_state.topic,
+                new_state.emotional_state,
+            )
+    except Exception as exc:
+        logger.warning(f"conv-state refresh failed: {exc}")

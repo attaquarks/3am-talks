@@ -450,11 +450,10 @@ def llm_arbitrate(
     """
     import os
     import httpx
+    from ai_layer.llm_client import post_chat_completion, _resolve_endpoints
 
-    from ai_layer.llm_client import post_chat_completion
-
-    if not (os.getenv("LLM_PRIMARY_URL") or os.getenv("COLAB_API_URL")):
-        return {"available": False, "reason": "No LLM endpoint configured"}
+    if not _resolve_endpoints():
+        return {"available": False, "reason": "no LLM endpoint configured"}
 
     if history:
         user_content = _LLM_ARBITER_CONTEXT_TEMPLATE.format(
