@@ -94,6 +94,14 @@ class Ella(Agent):
         )
         # Feature flag for the streaming SSE path. Default off for safe rollout.
         self._streaming = os.getenv("VOICE_STREAMING_ENABLED", "false").strip().lower() == "true"
+        # Tracks the most recent client-reported mic mute state. Audio is
+        # already gated client-side by LiveKit when muted, so this is for
+        # logging/telemetry only — the agent does not need to suppress STT
+        # explicitly. Defaults to False (microphone live) until the client
+        # reports otherwise.
+        self._user_muted: bool = False
+        if self._room is not None:
+            self._register_room_handlers()
 
     def _extract_user_text(self, chat_ctx: ChatContext) -> str:
         """Pull the last user message out of the LiveKit ChatContext.
@@ -226,6 +234,60 @@ class Ella(Agent):
             raise
         finally:
             await self._publish_agent_state("listening")
+
+    def _register_room_handlers(self) -> None:
+        """Subscribe to client-side data channel events.
+
+        Handles `voice.mute.state` payloads emitted by the frontend mute
+        button. Audio is already gated client-side by LiveKit, so the
+        backend role here is to log the state and surface it in the
+        agent-state stream so the UI label stays consistent.
+        """
+        if not self._room:
+            return
+
+        def _on_data(*args) -> None:
+            try:
+                # livekit-rtc 1.x passes a single DataPacket; older versions
+                # pass (data, participant, kind). Handle both.
+                packet = args[0] if args else None
+                data = getattr(packet, "data", None)
+                if data is None and isinstance(packet, (bytes, bytearray)):
+                    data = packet
+                if not isinstance(data, (bytes, bytearray)):
+                    return
+                payload = json.loads(data.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+                return
+            except Exception as exc:
+                logger.debug(
+                    f"[data_received] decode error: {type(exc).__name__}: {exc}"
+                )
+                return
+
+            if not isinstance(payload, dict):
+                return
+            if payload.get("type") != "voice.mute.state":
+                return
+            muted = bool(payload.get("muted"))
+            if muted == self._user_muted:
+                return
+            self._user_muted = muted
+            logger.info(f"[mute] user mute state changed: muted={muted}")
+            try:
+                loop = asyncio.get_event_loop()
+                state = "muted" if muted else "listening"
+                loop.create_task(self._publish_agent_state(state))
+            except RuntimeError:
+                # No running loop (rare on background callbacks); skip the
+                # state echo. The frontend already updated optimistically
+                # from its own track state.
+                pass
+
+        try:
+            self._room.on("data_received", _on_data)
+        except Exception as exc:
+            logger.warning(f"Failed to register data_received handler: {exc}")
 
     async def _publish_agent_state(self, state: str) -> None:
         """Publish an agent-state change over the data channel so the

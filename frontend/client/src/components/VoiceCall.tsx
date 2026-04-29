@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "@livekit/components-styles";
 import {
   LiveKitRoom,
@@ -10,7 +10,14 @@ import {
   DisconnectButton,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
-import { Phone, PhoneOff, Loader2, AlertCircle } from "lucide-react";
+import {
+  Phone,
+  PhoneOff,
+  Loader2,
+  AlertCircle,
+  Mic,
+  MicOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useVoiceCall } from "@/hooks/useVoiceCall";
@@ -45,7 +52,13 @@ function VoiceDataBridge({ onCrisisCountdown, onAgentState }: VoiceDataBridgePro
   return null;
 }
 
-function VoiceAssistantVisualizer({ agentState }: { agentState?: string }) {
+function VoiceAssistantVisualizer({
+  agentState,
+  isMuted,
+}: {
+  agentState?: string;
+  isMuted: boolean;
+}) {
   const { state, audioTrack } = useVoiceAssistant();
   const { microphoneTrack, localParticipant } = useLocalParticipant();
 
@@ -71,12 +84,21 @@ function VoiceAssistantVisualizer({ agentState }: { agentState?: string }) {
 
   // Prefer the agent's own published state (from backend) when present —
   // it distinguishes "thinking" from "generating" from "speaking" more
-  // precisely than LiveKit's derived state.
+  // precisely than LiveKit's derived state. When the user has muted their
+  // mic, override the label so the visual matches what Ella can hear.
   const effective = agentState ?? state;
+  const displayLabel = isMuted
+    ? "Microphone muted — Ella cannot hear you"
+    : stateLabel[effective] ?? effective;
 
   return (
     <div className="flex flex-col items-center justify-center gap-4">
-      <div className="h-32 w-full max-w-xs">
+      <div
+        className={cn(
+          "h-32 w-full max-w-xs transition-opacity duration-200",
+          isMuted && state !== "speaking" && "opacity-30",
+        )}
+      >
         {trackToVisualize && (
           <BarVisualizer
             state={state}
@@ -86,10 +108,86 @@ function VoiceAssistantVisualizer({ agentState }: { agentState?: string }) {
           />
         )}
       </div>
-      <p className="text-sm text-muted-foreground animate-pulse">
-        {stateLabel[effective] ?? effective}
+      <p
+        className={cn(
+          "text-sm text-muted-foreground",
+          !isMuted && "animate-pulse",
+        )}
+      >
+        {displayLabel}
       </p>
     </div>
+  );
+}
+
+// Mute toggle. The button reads its truth from the LiveKit microphone
+// track publication so external mute events (browser permission revoked,
+// hardware mute) stay in sync. On toggle it (1) flips the track via the
+// LiveKit SDK so no audio leaves the browser when muted, and (2) publishes
+// a `voice.mute.state` event on the data channel so the backend agent can
+// log/track the state. The data publish is best-effort — local mute is the
+// authoritative behavior.
+function MuteToggleButton({
+  onMuteChange,
+}: {
+  onMuteChange: (muted: boolean) => void;
+}) {
+  const { localParticipant, microphoneTrack } = useLocalParticipant();
+  const [pending, setPending] = useState(false);
+
+  const isMuted = microphoneTrack?.isMuted ?? false;
+
+  useEffect(() => {
+    onMuteChange(isMuted);
+  }, [isMuted, onMuteChange]);
+
+  const handleToggle = useCallback(async () => {
+    if (!localParticipant || pending) return;
+    setPending(true);
+    const next = !isMuted;
+    try {
+      await localParticipant.setMicrophoneEnabled(!next);
+
+      try {
+        const payload = JSON.stringify({
+          type: "voice.mute.state",
+          muted: next,
+          ts: Date.now() / 1000,
+        });
+        await localParticipant.publishData(
+          new TextEncoder().encode(payload),
+          { reliable: true, topic: "voice.control" },
+        );
+      } catch {
+        // Data publish is best-effort telemetry; the local mute already took effect.
+      }
+    } catch (err) {
+      console.error("[VoiceCall] Failed to toggle mute:", err);
+    } finally {
+      setPending(false);
+    }
+  }, [localParticipant, isMuted, pending]);
+
+  return (
+    <Button
+      type="button"
+      onClick={handleToggle}
+      disabled={pending || !localParticipant}
+      variant={isMuted ? "destructive" : "secondary"}
+      className={cn(
+        "inline-flex h-12 w-12 items-center justify-center rounded-full p-0 shadow-lg transition-all hover:shadow-xl",
+        isMuted && "ring-2 ring-destructive/40",
+      )}
+      title={isMuted ? "Unmute microphone" : "Mute microphone"}
+      aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+      aria-pressed={isMuted}
+    >
+      {isMuted ? (
+        <MicOff className="h-5 w-5" />
+      ) : (
+        <Mic className="h-5 w-5" />
+      )}
+    </Button>
   );
 }
 
@@ -109,9 +207,11 @@ export default function VoiceCall({ className }: VoiceCallProps) {
     seconds: 30,
   });
   const [agentState, setAgentState] = useState<string | undefined>(undefined);
+  const [isMuted, setIsMuted] = useState(false);
 
   const handleDisconnect = useCallback(() => {
     setAgentState(undefined);
+    setIsMuted(false);
     void disconnect();
   }, [disconnect]);
 
@@ -184,13 +284,16 @@ export default function VoiceCall({ className }: VoiceCallProps) {
             onCrisisCountdown={handleCrisisCountdown}
             onAgentState={setAgentState}
           />
-          <VoiceAssistantVisualizer agentState={agentState} />
+          <VoiceAssistantVisualizer agentState={agentState} isMuted={isMuted} />
 
-          {/* End call button */}
-          <DisconnectButton className="inline-flex items-center justify-center gap-2 rounded-full bg-destructive px-6 py-3 text-sm font-medium text-destructive-foreground shadow-lg transition-all hover:bg-destructive/90 hover:shadow-xl">
-            <PhoneOff className="h-4 w-4" />
-            End Call
-          </DisconnectButton>
+          {/* Call controls: mute toggle + end call */}
+          <div className="flex items-center justify-center gap-4">
+            <MuteToggleButton onMuteChange={setIsMuted} />
+            <DisconnectButton className="inline-flex items-center justify-center gap-2 rounded-full bg-destructive px-6 py-3 text-sm font-medium text-destructive-foreground shadow-lg transition-all hover:bg-destructive/90 hover:shadow-xl">
+              <PhoneOff className="h-4 w-4" />
+              End Call
+            </DisconnectButton>
+          </div>
         </LiveKitRoom>
       </div>
 
